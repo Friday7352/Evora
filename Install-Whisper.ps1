@@ -258,17 +258,17 @@ function New-Shortcut([string] $Target, [string] $Link, [string] $WorkingDirecto
     $shortcut.Save()
 }
 
-function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $AllowLan = $true, [switch] $Repair) {
-    & $OnProgress 5 'Preparing Whisper...'
+function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $AllowLan = $true, [bool] $CreateDesktopShortcut = $true, [bool] $StartWithWindows = $true, [switch] $Repair) {
+    & $OnProgress 5 'Preparing Evora...'
     if ($Repair) {
-        & $OnProgress 10 'Preparing the previous Whisper installation...'
+        & $OnProgress 10 'Preparing the previous Evora installation...'
         Remove-WhisperRuntime $Target
     }
     Copy-ProgramFiles $Target
     Write-WhisperInstallMarker $Target
     & $OnProgress 18 'Installing the stable Python runtime...'
     $python = Install-Python311
-    & $OnProgress 34 'Creating Whisper private Python environment...'
+    & $OnProgress 34 'Creating Evora private Python environment...'
     $venv = Join-Path $Target '.venv'
     if (Test-Path -LiteralPath $venv) { Remove-Item -LiteralPath $venv -Recurse -Force }
     Invoke-Checked -FilePath $python -Arguments @('-m', 'venv', $venv) -WorkingDirectory $Target
@@ -276,21 +276,23 @@ function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $Al
     if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
         throw ('Python completed but did not create the expected private environment at: {0}' -f $venvPython)
     }
-    & $OnProgress 48 'Installing Whisper and GPU-compatible libraries. This can take several minutes...'
+    & $OnProgress 48 'Installing Evora and GPU-compatible libraries. This can take several minutes...'
     Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--upgrade', 'pip') -WorkingDirectory $Target
     Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--no-input', '--disable-pip-version-check', '-r', 'requirements.txt') -WorkingDirectory $Target
     & $OnProgress 78 'Configuring network access...'
     if ($AllowLan) { Add-WhisperFirewallRule $Target }
-    & $OnProgress 88 'Registering Whisper to start automatically...'
-    Register-WhisperTask $Target
+    & $OnProgress 88 'Finishing Evora setup...'
+    if ($StartWithWindows) { Register-WhisperTask $Target }
     $desktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
     Register-WhisperInstalledApp $Target
-    New-Shortcut -Target (Join-Path $env:SystemRoot 'System32\wscript.exe') -Link (Join-Path $desktop 'Evora.lnk') -WorkingDirectory $Target
-    $shortcut = New-Object -ComObject WScript.Shell
-    $shortcutFile = $shortcut.CreateShortcut((Join-Path $desktop 'Evora.lnk'))
-    $shortcutFile.Arguments = ('"{0}"' -f (Join-Path $Target 'Whisper-Launcher.vbs'))
-    $shortcutFile.Save()
-    & $OnProgress 100 'Whisper is ready. You can open the Whisper desktop shortcut to see its status.'
+    if ($CreateDesktopShortcut) {
+        New-Shortcut -Target (Join-Path $env:SystemRoot 'System32\wscript.exe') -Link (Join-Path $desktop 'Evora.lnk') -WorkingDirectory $Target
+        $shortcut = New-Object -ComObject WScript.Shell
+        $shortcutFile = $shortcut.CreateShortcut((Join-Path $desktop 'Evora.lnk'))
+        $shortcutFile.Arguments = ('"{0}"' -f (Join-Path $Target 'Whisper-Launcher.vbs'))
+        $shortcutFile.Save()
+    }
+    & $OnProgress 100 'Evora is ready.'
 }
 
 if ($Uninstall) {
