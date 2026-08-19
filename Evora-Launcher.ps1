@@ -47,7 +47,7 @@ if ($requestedAction) {
             $python = Join-Path $Root '.venv\Scripts\python.exe'
             if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw 'Evora is not fully installed yet.' }
             Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
-            New-NetFirewallRule -DisplayName 'Whisper transcription service' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 9000 -Program $python -Profile Private | Out-Null
+            New-NetFirewallRule -DisplayName 'Whisper transcription service' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 9000 -Program $python -Profile Private -RemoteAddress LocalSubnet | Out-Null
         }
         'DisableLan' { Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue }
     }
@@ -87,6 +87,12 @@ $status = New-FrivoLabel -Theme $Theme -Parent $serverCard -Text 'Checking Evora
 $localUrl = New-FrivoLabel -Theme $Theme -Parent $serverCard -Text 'http://localhost:9000' -X 18 -Y 60 -W 250 -H 22 -Font $Theme.FontUI -Color $Theme.Ink
 $copy = New-FrivoButton -Theme $Theme -Parent $serverCard -Text 'Copy' -X 336 -Y 48 -W 68 -H 32
 
+$lanCard = New-FrivoCard -Theme $Theme -Parent $viewMain -X 24 -Y 108 -W 422 -H 78
+[void](New-FrivoLabel -Theme $Theme -Parent $lanCard -Text 'OTHER DEVICES ON YOUR NETWORK' -X 18 -Y 14 -W 300 -H 14 -Font $Theme.FontCaps -Color $Theme.Faint)
+$lanUrl = New-FrivoLabel -Theme $Theme -Parent $lanCard -Text '' -X 18 -Y 34 -W 270 -H 24 -Font $Theme.FontMid -Color $Theme.Ink
+$lanCopy = New-FrivoButton -Theme $Theme -Parent $lanCard -Text 'Copy' -X 336 -Y 26 -W 68 -H 32
+$lanCard.Visible = $false
+
 $modelCard = New-FrivoCard -Theme $Theme -Parent $viewMain -X 24 -Y 108 -W 200 -H 80
 [void](New-FrivoLabel -Theme $Theme -Parent $modelCard -Text 'ACTIVE MODEL' -X 18 -Y 14 -W 164 -H 14 -Font $Theme.FontCaps -Color $Theme.Faint)
 $modelSummary = New-FrivoLabel -Theme $Theme -Parent $modelCard -Text 'Waiting...' -X 18 -Y 38 -W 164 -H 24 -Font $Theme.FontMid -Color $Theme.Ink
@@ -103,18 +109,18 @@ $btnBack = New-FrivoButton -Theme $Theme -Parent $viewSettings -Text 'Back' -X 2
 $startupCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 24 -Y 70 -W 422 -H 62
 $startupCheck = New-FrivoCheck -Theme $Theme -Parent $startupCard -Text 'Start Evora automatically when Windows starts' -X 18 -Y 11 -W 386 -Checked $true
 [void](New-FrivoLabel -Theme $Theme -Parent $startupCard -Text 'Keeps private transcription ready for Frivo.' -X 38 -Y 35 -W 350 -H 18 -Font $Theme.FontSmall -Color $Theme.Dim)
-[void](New-FrivoLabel -Theme $Theme -Parent $viewSettings -Text 'NETWORK ACCESS' -X 30 -Y 146 -W 380 -H 16 -Font $Theme.FontCaps -Color $Theme.Faint)
+$networkHeading = New-FrivoLabel -Theme $Theme -Parent $viewSettings -Text 'NETWORK ACCESS' -X 30 -Y 146 -W 380 -H 16 -Font $Theme.FontCaps -Color $Theme.Faint
 $networkCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 24 -Y 168 -W 422 -H 62
-$networkCheck = New-FrivoCheck -Theme $Theme -Parent $networkCard -Text 'Allow Frivo connections from other devices' -X 18 -Y 11 -W 386 -Checked $true
-[void](New-FrivoLabel -Theme $Theme -Parent $networkCard -Text 'Opens port 9000 only on private networks.' -X 38 -Y 35 -W 350 -H 18 -Font $Theme.FontSmall -Color $Theme.Dim)
-[void](New-FrivoLabel -Theme $Theme -Parent $viewSettings -Text 'MODEL' -X 30 -Y 244 -W 380 -H 16 -Font $Theme.FontCaps -Color $Theme.Faint)
+$networkAction = New-FrivoButton -Theme $Theme -Parent $networkCard -Text 'Open port 9000' -X 18 -Y 13 -W 160 -H 36
+[void](New-FrivoLabel -Theme $Theme -Parent $networkCard -Text 'Lets Frivo devices on your private network connect to Evora.' -X 192 -Y 14 -W 208 -H 32 -Font $Theme.FontSmall -Color $Theme.Dim)
+$modelHeading = New-FrivoLabel -Theme $Theme -Parent $viewSettings -Text 'MODEL' -X 30 -Y 244 -W 380 -H 16 -Font $Theme.FontCaps -Color $Theme.Faint
 $activeCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 24 -Y 266 -W 200 -H 62
 [void](New-FrivoLabel -Theme $Theme -Parent $activeCard -Text 'ACTIVE MODEL' -X 18 -Y 10 -W 164 -H 14 -Font $Theme.FontCaps -Color $Theme.Faint)
 $activeModel = New-FrivoLabel -Theme $Theme -Parent $activeCard -Text 'Waiting...' -X 18 -Y 31 -W 164 -H 22 -Font $Theme.FontUI -Color $Theme.Ink
 $activeDeviceCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 236 -Y 266 -W 210 -H 62
 [void](New-FrivoLabel -Theme $Theme -Parent $activeDeviceCard -Text 'PROCESSING' -X 18 -Y 10 -W 174 -H 14 -Font $Theme.FontCaps -Color $Theme.Faint)
 $activeDevice = New-FrivoLabel -Theme $Theme -Parent $activeDeviceCard -Text 'Waiting...' -X 18 -Y 31 -W 174 -H 22 -Font $Theme.FontUI -Color $Theme.Ink
-[void](New-FrivoLabel -Theme $Theme -Parent $viewSettings -Text 'DOWNLOADED MODELS' -X 30 -Y 342 -W 380 -H 16 -Font $Theme.FontCaps -Color $Theme.Faint)
+$downloadHeading = New-FrivoLabel -Theme $Theme -Parent $viewSettings -Text 'DOWNLOADED MODELS' -X 30 -Y 342 -W 380 -H 16 -Font $Theme.FontCaps -Color $Theme.Faint
 $cachedCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 24 -Y 364 -W 422 -H 54
 $cachedModels = New-FrivoLabel -Theme $Theme -Parent $cachedCard -Text 'Checking model cache...' -X 18 -Y 16 -W 386 -H 22 -Font $Theme.FontSmall -Color $Theme.Dim
 $btnLog = New-FrivoButton -Theme $Theme -Parent $viewSettings -Text 'View service log' -X 24 -Y 434 -W 205 -H 36
@@ -143,9 +149,45 @@ function Test-EvoraNetworkEnabled {
     return $null -ne (Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue | Select-Object -First 1)
 }
 
+function Get-EvoraLanIp {
+    try {
+        $socket = New-Object System.Net.Sockets.Socket([System.Net.Sockets.AddressFamily]::InterNetwork, [System.Net.Sockets.SocketType]::Dgram, [System.Net.Sockets.ProtocolType]::Udp)
+        try { $socket.Connect('8.8.8.8', 80); return ([System.Net.IPEndPoint]$socket.LocalEndPoint).Address.ToString() } finally { $socket.Close() }
+    } catch { return $null }
+}
+
+function Test-EvoraLocalName {
+    try { return $null -ne ([System.Net.Dns]::GetHostAddresses('evora.local') | Where-Object { $_.ToString().StartsWith('127.') } | Select-Object -First 1) } catch { return $false }
+}
+
 $script:cachedModelText = 'Checking model cache...'
 $script:nextModelCacheScan = [DateTime]::MinValue
 $script:loadingSettings = $false
+
+function Set-EvoraMainNetworkState([bool] $ShowLan) {
+    $lanCard.Visible = $ShowLan
+    $y = if ($ShowLan) { 196 } else { 108 }
+    $modelCard.Location = [System.Drawing.Point]::new(24, $y)
+    $deviceCard.Location = [System.Drawing.Point]::new(236, $y)
+    $below = if ($ShowLan) { 88 } else { 0 }
+    $note.Location = [System.Drawing.Point]::new(28, 202 + $below)
+    $btnOpen.Location = [System.Drawing.Point]::new(24, 246 + $below)
+    $btnSettings.Location = [System.Drawing.Point]::new(24, 300 + $below)
+    $btnPower.Location = [System.Drawing.Point]::new(241, 300 + $below)
+}
+
+function Set-EvoraSettingsNetworkState([bool] $PortOpen) {
+    $networkHeading.Visible = -not $PortOpen
+    $networkCard.Visible = -not $PortOpen
+    $offset = if ($PortOpen) { -98 } else { 0 }
+    $modelHeading.Location = [System.Drawing.Point]::new(30, 244 + $offset)
+    $activeCard.Location = [System.Drawing.Point]::new(24, 266 + $offset)
+    $activeDeviceCard.Location = [System.Drawing.Point]::new(236, 266 + $offset)
+    $downloadHeading.Location = [System.Drawing.Point]::new(30, 342 + $offset)
+    $cachedCard.Location = [System.Drawing.Point]::new(24, 364 + $offset)
+    $btnLog.Location = [System.Drawing.Point]::new(24, 434 + $offset)
+    $btnFolder.Location = [System.Drawing.Point]::new(241, 434 + $offset)
+}
 
 function Update-EvoraStatus {
     $taskState = 'Not registered'
@@ -160,6 +202,14 @@ function Update-EvoraStatus {
         $script:nextModelCacheScan = [DateTime]::Now.AddSeconds(30)
     }
     $cachedModels.Text = $script:cachedModelText
+    $localAddress = if (Test-EvoraLocalName) { 'http://evora.local:9000' } else { 'http://localhost:9000' }
+    $localUrl.Text = $localAddress
+    $lanAddress = Get-EvoraLanIp
+    $portOpen = Test-EvoraNetworkEnabled
+    $showLan = $portOpen -and -not [string]::IsNullOrWhiteSpace($lanAddress)
+    if ($showLan) { $lanUrl.Text = ('http://{0}:9000' -f $lanAddress) }
+    Set-EvoraMainNetworkState $showLan
+    Set-EvoraSettingsNetworkState $portOpen
     if ($health -and $health.ok) {
         $modelName = ConvertTo-EvoraTitle $health.model
         $processing = if ($health.device -eq 'cuda') { 'GPU (CUDA)' } elseif ($health.device -eq 'cpu') { 'CPU' } else { ConvertTo-EvoraTitle $health.device }
@@ -169,7 +219,7 @@ function Update-EvoraStatus {
         $deviceSummary.Text = $processing
         $activeModel.Text = $modelName
         $activeDevice.Text = $processing
-        $note.Text = 'Frivo can connect at http://localhost:9000.'
+        $note.Text = if ($showLan) { 'evora.local works on this PC. Other devices use the address above.' } else { 'Frivo can connect at ' + $localAddress + '.' }
         $btnOpen.Text = 'Open service status'; $btnOpen.Enabled = $true
         $btnPower.Text = 'Stop Evora'; $btnPower.Enabled = $true
     } else {
@@ -185,18 +235,18 @@ function Update-EvoraStatus {
     }
 }
 
-$copy.Add_Click({ try { [System.Windows.Forms.Clipboard]::SetText('http://localhost:9000'); $copy.Text = 'Copied' } catch { } })
+$copy.Add_Click({ try { [System.Windows.Forms.Clipboard]::SetText($localUrl.Text); $copy.Text = 'Copied' } catch { } })
+$lanCopy.Add_Click({ try { [System.Windows.Forms.Clipboard]::SetText($lanUrl.Text); $lanCopy.Text = 'Copied' } catch { } })
 $btnOpen.Add_Click({
     if ($btnOpen.Text -eq 'Start Evora') {
         Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-Start')
-    } else { Start-Process 'http://localhost:9000' }
+    } else { Start-Process $localUrl.Text }
     Update-EvoraStatus
 })
 $btnPower.Add_Click({ Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-Stop'); Update-EvoraStatus })
 $btnSettings.Add_Click({
     $script:loadingSettings = $true
     $startupCheck.Checked = Test-EvoraStartupEnabled
-    $networkCheck.Checked = Test-EvoraNetworkEnabled
     $script:loadingSettings = $false
     $viewMain.Visible = $false; $viewSettings.Visible = $true
 })
@@ -206,17 +256,20 @@ $startupCheck.Add_CheckedChanged({
     $action = if ($startupCheck.Checked) { '-EnableStartup' } else { '-DisableStartup' }
     Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), $action)
 })
-$networkCheck.Add_CheckedChanged({
-    if ($script:loadingSettings) { return }
-    $action = if ($networkCheck.Checked) { '-EnableLan' } else { '-DisableLan' }
-    Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), $action)
+$networkAction.Add_Click({
+    $networkAction.Enabled = $false
+    $networkAction.Text = 'Opening...'
+    [System.Windows.Forms.Application]::DoEvents()
+    Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-EnableLan') | Out-Null
+    $networkAction.Text = 'Open port 9000'
+    Update-EvoraStatus
 })
 $btnLog.Add_Click({ $log = Join-Path $Root 'whisper_service.log'; if (Test-Path -LiteralPath $log) { Start-Process notepad.exe -ArgumentList ('"{0}"' -f $log) } })
 $btnFolder.Add_Click({ Start-Process explorer.exe -ArgumentList ('"{0}"' -f $Root) })
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 5000
-$timer.Add_Tick({ Update-EvoraStatus; if ($copy.Text -eq 'Copied') { $copy.Text = 'Copy' } })
+$timer.Add_Tick({ Update-EvoraStatus; if ($copy.Text -eq 'Copied') { $copy.Text = 'Copy' }; if ($lanCopy.Text -eq 'Copied') { $lanCopy.Text = 'Copy' } })
 $timer.Start()
 $form.Add_FormClosed({ $timer.Stop(); $timer.Dispose() })
 Update-EvoraStatus

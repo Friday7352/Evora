@@ -31,9 +31,9 @@ Evora installation folder during setup.
 ## Connect Frivo
 
 1. Start Evora from its desktop shortcut, or wait for the startup task.
-2. Confirm `http://localhost:9000/health` answers on the Evora PC.
+2. Confirm `http://evora.local:9000/health` answers on the Evora PC.
 3. In Frivo, select **Evora** as the transcription provider.
-4. Use `http://localhost:9000` when both apps are on the same PC; otherwise
+4. Use `http://evora.local:9000` when both apps are on the same PC; otherwise
    use `http://<Evora-PC-LAN-address>:9000` and click **Test**.
 
 ## Manual control

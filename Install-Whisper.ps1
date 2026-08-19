@@ -185,7 +185,27 @@ function Add-WhisperFirewallRule([string] $Target) {
     Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue |
         Remove-NetFirewallRule -ErrorAction SilentlyContinue
     New-NetFirewallRule -DisplayName 'Whisper transcription service' -Direction Inbound -Action Allow `
-        -Protocol TCP -LocalPort 9000 -Program $python -Profile Private | Out-Null
+        -Protocol TCP -LocalPort 9000 -Program $python -Profile Private -RemoteAddress LocalSubnet | Out-Null
+}
+
+function Get-EvoraHostsPath {
+    return (Join-Path $env:SystemRoot 'System32\drivers\etc\hosts')
+}
+
+function Add-EvoraHostsEntry {
+    $hosts = Get-EvoraHostsPath
+    $lines = if (Test-Path -LiteralPath $hosts) { @([IO.File]::ReadAllLines($hosts)) } else { @() }
+    if ($lines | Where-Object { $_ -match '(?i)^\s*[0-9a-fA-F:\.]+\s+.*\bevora\.local\b' }) { return }
+    $entry = "127.0.0.1`tevora.local`t# Evora - added by setup, removed on uninstall"
+    [IO.File]::WriteAllLines($hosts, [string[]]($lines + $entry))
+}
+
+function Remove-EvoraHostsEntry {
+    $hosts = Get-EvoraHostsPath
+    if (-not (Test-Path -LiteralPath $hosts)) { return }
+    $lines = @([IO.File]::ReadAllLines($hosts))
+    $kept = @($lines | Where-Object { $_ -notmatch '(?i)^\s*127\.0\.0\.1\s+evora\.local\s+# Evora - added by setup, removed on uninstall\s*$' })
+    if ($kept.Count -ne $lines.Count) { [IO.File]::WriteAllLines($hosts, [string[]]$kept) }
 }
 
 function Register-WhisperTask([string] $Target) {
@@ -265,6 +285,7 @@ function Uninstall-Whisper([string] $Target) {
         Where-Object { $_.ExecutablePath -and $_.ExecutablePath.Equals((Join-Path $installed 'EvoraHost.exe'), [StringComparison]::OrdinalIgnoreCase) } |
         ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null }
     Remove-WhisperRuntime $Target
+    Remove-EvoraHostsEntry
     Remove-WhisperInstalledApp
     Remove-Item -LiteralPath (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Evora.lnk') -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $installed -Recurse -Force -ErrorAction Stop
@@ -290,6 +311,8 @@ function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $Al
     }
     Copy-ProgramFiles $Target
     Write-WhisperInstallMarker $Target
+    & $OnProgress 12 'Setting up the evora.local address...'
+    try { Add-EvoraHostsEntry } catch { Write-SetupLog ('Could not add evora.local: ' + $_.Exception.Message) }
     & $OnProgress 18 'Installing the stable Python runtime...'
     $python = Install-Python311
     & $OnProgress 34 'Creating Evora private Python environment...'
