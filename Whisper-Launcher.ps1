@@ -33,8 +33,8 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 Import-Module (Join-Path $Root 'Whisper.Ui.psm1') -Force
 $Theme = Get-FrivoTheme
-$form = New-FrivoForm -Theme $Theme -Title 'Whisper' -Width 620 -Height 390
-$header = New-FrivoHeader -Theme $Theme -Form $form -Title 'Whisper' -Subtitle 'Local transcription service for Frivo'
+$form = New-FrivoForm -Theme $Theme -Title 'Evora' -Width 620 -Height 390 -IconPath (Join-Path $Root 'Evora.png')
+$header = New-FrivoHeader -Theme $Theme -Form $form -Title 'Evora' -Subtitle 'Local transcription service for Frivo' -LogoPngPath (Join-Path $Root 'Evora.png')
 $header.Logo.BackColor = $Theme.Accent
 Set-FrivoRounded -Control $header.Logo -Radius 12
 $mark = New-FrivoLabel -Theme $Theme -Parent $header.Logo -Text 'W' -X 0 -Y 5 -W 36 -H 28 -Font $Theme.FontMid -Color ([System.Drawing.Color]::White)
@@ -44,7 +44,7 @@ $card = New-FrivoCard -Theme $Theme -Parent $form -X 24 -Y 86 -W 572 -H 170
 $dot = New-Object System.Windows.Forms.Panel
 $dot.Location = New-Object System.Drawing.Point(22, 22); $dot.Size = New-Object System.Drawing.Size(12, 12)
 $dot.BackColor = $Theme.Faint; Set-FrivoRounded -Control $dot -Radius 12; $card.Controls.Add($dot)
-$status = New-FrivoLabel -Theme $Theme -Parent $card -Text 'Checking Whisper...' -X 48 -Y 16 -W 490 -H 24 -Font $Theme.FontMid -Color $Theme.Ink
+$status = New-FrivoLabel -Theme $Theme -Parent $card -Text 'Checking Evora...' -X 48 -Y 16 -W 490 -H 24 -Font $Theme.FontMid -Color $Theme.Ink
 $details = New-FrivoLabel -Theme $Theme -Parent $card -Text '' -X 22 -Y 52 -W 526 -H 90 -Font $Theme.FontSmall -Color $Theme.Dim
 
 $btnRefresh = New-FrivoButton -Theme $Theme -Parent $form -Text 'Refresh' -X 24 -Y 284 -W 108 -H 36
@@ -58,14 +58,14 @@ function Update-WhisperStatus {
         $health = Invoke-RestMethod -Uri 'http://127.0.0.1:9000/health' -TimeoutSec 2 -ErrorAction Stop
         if ($health.ok) {
             $dot.BackColor = $Theme.Signal
-            $status.Text = 'Whisper is running'
+            $status.Text = 'Evora is running'
             $details.Text = "Frivo can connect at http://localhost:9000`r`nModel: $($health.model)    Device: $($health.device)`r`nThe service starts automatically with Windows."
             $btnStart.Enabled = $false; $btnStop.Enabled = $true
             return
         }
     } catch { }
     $dot.BackColor = $Theme.Warn
-    $status.Text = if ($taskState -eq 'Running') { 'Whisper is starting...' } else { 'Whisper is not running' }
+    $status.Text = if ($taskState -eq 'Running') { 'Evora is starting...' } else { 'Evora is not running' }
     $details.Text = "Service task: $taskState`r`nThe first model download can take several minutes. Keep this window open to see when Whisper is ready."
     $btnStart.Enabled = $true; $btnStop.Enabled = ($taskState -eq 'Running')
 }

@@ -11,6 +11,7 @@
 param(
     [switch] $Silent,
     [switch] $Uninstall,
+    [switch] $NoUi,
     [string] $InstallPath = (Join-Path $env:ProgramFiles 'Whisper')
 )
 
@@ -30,6 +31,7 @@ if (-not $admin) {
     $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath))
     if ($Silent) { $arguments += '-Silent' }
     if ($Uninstall) { $arguments += '-Uninstall' }
+    if ($NoUi) { $arguments += '-NoUi' }
     if ($InstallPath) { $arguments += @('-InstallPath', ('"{0}"' -f $InstallPath)) }
     Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -ArgumentList $arguments
     exit 0
@@ -162,7 +164,7 @@ function Copy-ProgramFiles([string] $Destination) {
         '.gitattributes', '.gitignore', 'LICENSE', 'README.md', 'requirements.txt',
         'whisper_server.py', 'StartWhisper.bat', 'install_whisper_task.ps1',
         'uninstall_whisper_task.ps1', 'Install-Whisper.ps1', 'Install-Whisper.cmd', 'Install-Whisper.vbs',
-        'Uninstall-Whisper.vbs', 'Whisper-Launcher.ps1', 'Whisper-Launcher.vbs', 'Whisper.Ui.psm1'
+        'Uninstall-Whisper.vbs', 'Whisper-Launcher.ps1', 'Whisper-Launcher.vbs', 'Whisper.Ui.psm1', 'Evora-Setup.ps1', 'Evora.png'
     )
     foreach ($name in $keep) {
         $from = Join-Path $SourceDir $name
@@ -203,7 +205,7 @@ function Register-WhisperInstalledApp([string] $Target) {
     $key = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Whisper'
     $uninstaller = Join-Path $Target 'Uninstall-Whisper.vbs'
     New-Item -Path $key -Force | Out-Null
-    New-ItemProperty -Path $key -Name 'DisplayName' -Value 'Whisper for Frivo' -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $key -Name 'DisplayName' -Value 'Evora' -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $key -Name 'DisplayVersion' -Value '1.0' -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $key -Name 'Publisher' -Value 'Frivo' -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $key -Name 'InstallLocation' -Value $Target -PropertyType String -Force | Out-Null
@@ -242,7 +244,7 @@ function Uninstall-Whisper([string] $Target) {
     Write-SetupLog ('Uninstalling Whisper from ' + $installed)
     Remove-WhisperRuntime $Target
     Remove-WhisperInstalledApp
-    Remove-Item -LiteralPath (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Whisper.lnk') -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Evora.lnk') -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $installed -Recurse -Force -ErrorAction Stop
     Write-SetupLog 'Whisper uninstall completed.'
 }
@@ -283,9 +285,9 @@ function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $Al
     Register-WhisperTask $Target
     $desktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
     Register-WhisperInstalledApp $Target
-    New-Shortcut -Target (Join-Path $env:SystemRoot 'System32\wscript.exe') -Link (Join-Path $desktop 'Whisper.lnk') -WorkingDirectory $InstallPath
+    New-Shortcut -Target (Join-Path $env:SystemRoot 'System32\wscript.exe') -Link (Join-Path $desktop 'Evora.lnk') -WorkingDirectory $Target
     $shortcut = New-Object -ComObject WScript.Shell
-    $shortcutFile = $shortcut.CreateShortcut((Join-Path $desktop 'Whisper.lnk'))
+    $shortcutFile = $shortcut.CreateShortcut((Join-Path $desktop 'Evora.lnk'))
     $shortcutFile.Arguments = ('"{0}"' -f (Join-Path $Target 'Whisper-Launcher.vbs'))
     $shortcutFile.Save()
     & $OnProgress 100 'Whisper is ready. You can open the Whisper desktop shortcut to see its status.'
@@ -300,6 +302,8 @@ if ($Silent) {
     try { Install-Whisper -Target $InstallPath -OnProgress { param($percent, $message) Write-Host ("{0}%  {1}" -f $percent, $message) }; exit 0 }
     catch { Write-Error $_; exit 1 }
 }
+
+if ($NoUi) { return }
 
 $script:ExistingInstall = Get-ExistingWhisperInstall $InstallPath
 
