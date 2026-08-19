@@ -1,0 +1,28 @@
+# Downloaded AI models and runtime data
+model_cache/
+ecapa_model/
+
+# Python environments and build artifacts
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+build/
+dist/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Secrets and local configuration
+.env
+.env.*
+config.json
+settings.json
+
+# Windows and editor files
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
