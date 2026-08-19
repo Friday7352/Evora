@@ -200,9 +200,9 @@ function Copy-ProgramFiles([string] $Destination) {
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
     $keep = @(
         '.gitattributes', '.gitignore', 'LICENSE', 'README.md', 'THIRD_PARTY_NOTICES.txt', 'requirements.txt',
-        'whisper_server.py', 'StartWhisper.bat', 'install_whisper_task.ps1',
-        'uninstall_whisper_task.ps1', 'Install-Whisper.ps1', 'Install-Whisper.cmd', 'Install-Whisper.vbs',
-        'Uninstall-Whisper.vbs', 'Evora-Uninstall.ps1', 'Whisper-Launcher.ps1', 'Whisper-Launcher.vbs', 'Evora-Launcher.ps1', 'EvoraHost.exe', 'EvoraSetupHost.exe', 'Whisper.Ui.psm1', 'Evora-Setup.ps1', 'Evora-Setup.vbs', 'Evora.png', 'EvoraIcon.ico'
+        'whisper_server.py', 'Install-Whisper.ps1', 'Uninstall-Whisper.vbs',
+        'Evora-Uninstall.ps1', 'Evora-Launcher.ps1', 'EvoraHost.exe', 'EvoraSetupHost.exe',
+        'Whisper.Ui.psm1', 'Evora-Setup.ps1', 'Evora-Setup.vbs', 'Evora.png', 'EvoraIcon.ico'
     )
     foreach ($name in $keep) {
         $from = Join-Path $SourceDir $name

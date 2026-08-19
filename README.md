@@ -13,10 +13,10 @@ Evora and speaker-labelling packages, a private-network firewall rule, and
 a Windows startup task. It replaces the former Python 3.14 path, which is not
 a stable Windows combination for the Whisper/GPU/speaker package stack.
 
-If Evora is already installed, setup offers **Repair or reinstall** (which
-rebuilds the Python environment while keeping downloaded models) or
-**Uninstall Evora**. It also recognizes the incomplete folder left by an
-older failed setup and can clean it up before reinstalling.
+If Evora is already installed, setup offers **Update** (keeps the existing
+private Python environment), **Repair** (rebuilds Python and GPU libraries
+while keeping downloaded models), or **Uninstall Evora**. It also recognizes
+the incomplete folder left by an older failed setup.
 
 The first startup downloads the selected Evora model. Downloaded models,
 speaker models, logs, and the virtual environment are intentionally ignored
@@ -36,12 +36,14 @@ Evora installation folder during setup.
 4. Use `http://evora.local:9000` when both apps are on the same PC; otherwise
    use `http://<Evora-PC-LAN-address>:9000` and click **Test**.
 
-## Manual control
+## Repository layout
 
-`StartWhisper.bat` runs a visible copy for troubleshooting. The installer also
-registers `WhisperTranscriptionService`; use Task Scheduler to start or stop
-the background service. `uninstall_whisper_task.ps1` removes the older
-manually configured task.
+The files at the repository root are the current, self-contained Evora release
+bundle. Keep them together when distributing or running setup.
+
+- `legacy/` contains pre-Evora Whisper launchers and manual task helpers. They
+  are retained only for reference and are not installed by current setup.
+- `build/` contains the native Windows host source and its build manifest.
 
 ## Requirements
 
