@@ -99,9 +99,17 @@ function Invoke-Checked([string] $FilePath, [string[]] $Arguments, [string] $Wor
         throw ('Setup could not find its working folder: {0}' -f $WorkingDirectory)
     }
     Write-SetupLog ('RUN {0} {1}' -f $FilePath, ($Arguments -join ' '))
-    $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -WorkingDirectory $WorkingDirectory `
-        -Wait -PassThru -NoNewWindow
-    if ($process.ExitCode -ne 0) { throw ("{0} failed with exit code {1}." -f $FilePath, $process.ExitCode) }
+    # Invoking the executable directly preserves every argument as a distinct
+    # value. Start-Process joins an argument array into one string, which used
+    # to split C:\Program Files\Whisper\.venv at its space.
+    Push-Location -LiteralPath $WorkingDirectory
+    try {
+        & $FilePath @Arguments
+        $exitCode = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+    if ($exitCode -ne 0) { throw ("{0} failed with exit code {1}." -f $FilePath, $exitCode) }
 }
 
 function Find-Python311 {
@@ -241,6 +249,9 @@ function Install-Whisper([scriptblock] $OnProgress, [bool] $AllowLan = $true, [s
     if (Test-Path -LiteralPath $venv) { Remove-Item -LiteralPath $venv -Recurse -Force }
     Invoke-Checked -FilePath $python -Arguments @('-m', 'venv', $venv) -WorkingDirectory $InstallPath
     $venvPython = Join-Path $venv 'Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+        throw ('Python completed but did not create the expected private environment at: {0}' -f $venvPython)
+    }
     & $OnProgress 48 'Installing Whisper and GPU-compatible libraries…'
     Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--upgrade', 'pip') -WorkingDirectory $InstallPath
     Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--no-input', '--disable-pip-version-check', '-r', 'requirements.txt') -WorkingDirectory $InstallPath
@@ -360,11 +371,29 @@ $markText.Text='W'; $markText.Location=[Drawing.Point]::new(0,4); $markText.Size
 $markText.Font=[Drawing.Font]::new('Segoe UI Semibold',12); $markText.ForeColor=[Drawing.Color]::White
 $markText.BackColor=[Drawing.Color]::Transparent; $markText.TextAlign='MiddleCenter'
 $mark.Controls.Add($markText); $form.Controls.Add($mark)
-[void](Add-Label 'Whisper Setup' 78 18 500 36 ([Drawing.Font]::new('Segoe UI Semibold',19)) $ink)
-[void](Add-Label 'Private, local transcription for Frivo' 80 57 500 22 ([Drawing.Font]::new('Segoe UI',9)) $dim)
+$setupTitle = Add-Label 'Welcome to Whisper Setup' 78 18 500 36 ([Drawing.Font]::new('Segoe UI Semibold',19)) $ink
+$setupSubtitle = Add-Label 'Private, local transcription for Frivo' 80 57 500 22 ([Drawing.Font]::new('Segoe UI',9)) $dim
+$welcomePanel = New-Object Windows.Forms.Panel
+$welcomePanel.Location=[Drawing.Point]::new(24,96); $welcomePanel.Size=[Drawing.Size]::new(572,210); $welcomePanel.BackColor=$surface
+Set-WhisperRounded $welcomePanel 18; $form.Controls.Add($welcomePanel)
+$welcomeText = New-Object Windows.Forms.Label
+$welcomeText.Location=[Drawing.Point]::new(20,18); $welcomeText.Size=[Drawing.Size]::new(532,160)
+$welcomeText.BackColor=$surface; $welcomeText.ForeColor=$ink; $welcomeText.Font=[Drawing.Font]::new('Segoe UI',10)
+$welcomeText.Text = @"
+This wizard installs Whisper, a private transcription service that lets Frivo
+turn speech into text on your own computer.
+
+Setup creates a separate, stable Python environment, starts the local service
+automatically after Windows restarts, and can optionally allow Frivo on your
+private network to connect. The first startup downloads the Whisper model.
+
+Click Next to choose an installation action.
+"@
+$welcomePanel.Controls.Add($welcomeText)
 $panel = New-Object Windows.Forms.Panel
 $panel.Location=[Drawing.Point]::new(24,96); $panel.Size=[Drawing.Size]::new(572,210); $panel.BackColor=$surface
 Set-WhisperRounded $panel 18
+$panel.Visible=$false
 $form.Controls.Add($panel)
 $summary = New-Object Windows.Forms.Label
 $summary.Location=[Drawing.Point]::new(20,18); $summary.Size=[Drawing.Size]::new(532,160); $summary.BackColor=$surface; $summary.ForeColor=$ink
@@ -421,13 +450,30 @@ $script:progressBar | Add-Member -MemberType ScriptMethod -Name SetValue -Value 
     $this.Fill.Size=[Drawing.Size]::new([int]($this.Width*$this.Value/100),$this.Fill.Size.Height)
 }
 $status = Add-Label 'Ready to install.' 28 344 564 24 ([Drawing.Font]::new('Segoe UI',9)) $dim
-$install = Add-Button 'Install Whisper' 354 390 150 $true
+$back = Add-Button 'Back' 246 390 96 $false
+$back.Visible=$false
+$install = Add-Button 'Next' 354 390 150 $true
 $cancel = Add-Button 'Cancel' 516 390 80 $false
 $script:completed = $false
+$script:showingWelcome = $true
 
 $cancel.Add_Click({ $form.Close() })
+$back.Add_Click({
+    $panel.Visible=$false; $welcomePanel.Visible=$true
+    $setupTitle.Text='Welcome to Whisper Setup'
+    $setupSubtitle.Text='Private, local transcription for Frivo'
+    $back.Visible=$false; $install.Text='Next'; $script:showingWelcome=$true
+})
 $install.Add_Click({
     if ($script:completed) { $form.Close(); return }
+    if ($script:showingWelcome) {
+        $welcomePanel.Visible=$false; $panel.Visible=$true
+        $setupTitle.Text = if($script:ExistingInstall.State -eq 'None'){'Install Whisper'}else{'Existing Whisper installation'}
+        $setupSubtitle.Text = if($script:ExistingInstall.State -eq 'None'){'Ready to install the local transcription service'}else{'Repair, reinstall, or remove Whisper'}
+        $back.Visible=$true; $install.Text=if($script:ExistingInstall.State -eq 'None'){'Install Whisper'}else{'Continue'}
+        $script:showingWelcome=$false
+        return
+    }
     $install.Enabled=$false; $cancel.Enabled=$false
     try {
         if ($script:ExistingInstall.State -ne 'None' -and $uninstallOption.Checked) {
