@@ -330,20 +330,12 @@ $btnFolder.Add_Click({ Start-Process explorer.exe -ArgumentList ('"{0}"' -f $Roo
 # or stops it explicitly.
 $notify = New-Object System.Windows.Forms.NotifyIcon
 $notify.Text = 'Evora'
-$script:trayIcon = $null
-# Use the executable's embedded icon for the notification area.  It is the
-# same icon Windows uses for Evora in Task Manager and survives after the
-# form is hidden; loading a transient .ico directly can disappear on some
-# Windows builds.
-try {
-    $nativeLauncher = Join-Path $Root 'EvoraHost.exe'
-    $script:trayIcon = if (Test-Path -LiteralPath $nativeLauncher) {
-        [System.Drawing.Icon]::ExtractAssociatedIcon($nativeLauncher)
-    } else {
-        New-Object System.Drawing.Icon($IconPath)
-    }
-    $notify.Icon = $script:trayIcon
-} catch { }
+# Match Frivo's proven tray setup: use the packaged .ico directly.  The icon
+# extracted from the native host can be null in this embedded PowerShell host,
+# which leaves Windows with a notification but no visible tray entry.
+if (Test-Path -LiteralPath $IconPath) {
+    try { $notify.Icon = New-Object System.Drawing.Icon($IconPath) } catch { }
+}
 $trayMenu = New-Object System.Windows.Forms.ContextMenuStrip
 $trayShow = $trayMenu.Items.Add('Show Evora')
 [void] $trayMenu.Items.Add('-')
@@ -379,7 +371,9 @@ $form.Add_FormClosing({
     if ($script:quitting -or $eventArgs.CloseReason -ne [System.Windows.Forms.CloseReason]::UserClosing) { return }
     if ($script:launcherSettings.CloseAction -eq 'keep' -and $script:serviceRunning) {
         $eventArgs.Cancel = $true
-        $form.Hide(); $form.ShowInTaskbar = $false
+        # Keep the same form/message loop alive, just as Frivo does.  This is
+        # what keeps the notification-area icon and its menu registered.
+        $form.Hide()
         if (-not $script:trayNoticeShown) {
             $script:trayNoticeShown = $true
             try { $notify.ShowBalloonTip(2500, 'Evora', 'Evora is still running. Right-click the tray icon to stop it.', [System.Windows.Forms.ToolTipIcon]::Info) } catch { }
@@ -391,7 +385,6 @@ $form.Add_FormClosing({
 })
 $form.Add_FormClosed({
     $timer.Stop(); $timer.Dispose(); $notify.Visible = $false; $notify.Dispose()
-    if ($script:trayIcon) { $script:trayIcon.Dispose() }
 })
 Update-EvoraStatus
 [void]$form.ShowDialog()
