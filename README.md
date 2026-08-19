@@ -22,6 +22,12 @@ The first startup downloads the selected Evora model. Downloaded models,
 speaker models, logs, and the virtual environment are intentionally ignored
 by Git.
 
+## Third-party notices
+
+Evora includes [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) with the
+license notices for its transcription dependencies. A copy is placed in the
+Evora installation folder during setup.
+
 ## Connect Frivo
 
 1. Start Evora from its desktop shortcut, or wait for the startup task.

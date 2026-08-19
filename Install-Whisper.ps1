@@ -167,7 +167,7 @@ function Install-Python311 {
 function Copy-ProgramFiles([string] $Destination) {
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
     $keep = @(
-        '.gitattributes', '.gitignore', 'LICENSE', 'README.md', 'requirements.txt',
+        '.gitattributes', '.gitignore', 'LICENSE', 'README.md', 'THIRD_PARTY_NOTICES.txt', 'requirements.txt',
         'whisper_server.py', 'StartWhisper.bat', 'install_whisper_task.ps1',
         'uninstall_whisper_task.ps1', 'Install-Whisper.ps1', 'Install-Whisper.cmd', 'Install-Whisper.vbs',
         'Uninstall-Whisper.vbs', 'Whisper-Launcher.ps1', 'Whisper-Launcher.vbs', 'Evora-Launcher.ps1', 'EvoraHost.exe', 'EvoraSetupHost.exe', 'Whisper.Ui.psm1', 'Evora-Setup.ps1', 'Evora-Setup.vbs', 'Evora.png', 'Evora.ico'
