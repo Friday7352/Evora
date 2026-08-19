@@ -327,6 +327,41 @@ function Remove-WhisperRuntime([string] $Target) {
     }
 }
 
+function Stop-EvoraLauncherForUpdate([string] $Target) {
+    # EvoraHost.exe holds its own executable open.  Ask its window to close
+    # first, then end only the host that belongs to this exact installation if
+    # it remains alive (the normal close preference may minimize it to tray).
+    $hostPaths = @(
+        (Join-Path $Target 'EvoraHost.exe'),
+        (Join-Path $Target 'Evora.exe')
+    )
+    $hosts = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $processInfo = $_
+        if ($processInfo.Name -notin @('EvoraHost.exe', 'Evora.exe') -or -not $processInfo.ExecutablePath) { return $false }
+        foreach ($hostPath in $hostPaths) {
+            if ($hostPath.Equals($processInfo.ExecutablePath, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+        }
+        return $false
+    })
+    foreach ($host in $hosts) {
+        try {
+            $process = Get-Process -Id $host.ProcessId -ErrorAction Stop
+            [void] $process.CloseMainWindow()
+        } catch { }
+    }
+    if ($hosts.Count) { Start-Sleep -Milliseconds 600 }
+    $closed = 0
+    foreach ($host in $hosts) {
+        try {
+            $process = Get-Process -Id $host.ProcessId -ErrorAction Stop
+            Stop-Process -Id $process.Id -Force -ErrorAction Stop
+            $closed++
+        } catch { }
+    }
+    if ($closed) { Start-Sleep -Milliseconds 400 }
+    return ($hosts.Count -gt 0)
+}
+
 function Uninstall-Whisper([string] $Target) {
     $existing = Get-ExistingWhisperInstall $Target
     if ($existing.State -eq 'None') {
@@ -379,6 +414,10 @@ function New-Shortcut([string] $Target, [string] $Link, [string] $WorkingDirecto
 
 function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $AllowLan = $true, [bool] $CreateDesktopShortcut = $true, [bool] $StartWithWindows = $true, [switch] $Repair) {
     & $OnProgress 5 'Preparing Evora...'
+    if (Test-WhisperInstallOwnership $Target) {
+        & $OnProgress 8 'Closing any running Evora window...'
+        [void] (Stop-EvoraLauncherForUpdate $Target)
+    }
     if ($Repair) {
         & $OnProgress 10 'Preparing the previous Evora installation...'
         Remove-WhisperRuntime $Target

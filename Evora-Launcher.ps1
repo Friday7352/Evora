@@ -90,6 +90,17 @@ if ($requestedAction) {
     exit 0
 }
 
+# Match Frivo's single-launcher behavior.  A second launch signals the first
+# window (including one hidden in the notification area) and exits.
+$createdMutex = $false
+$instanceLock = New-Object System.Threading.Mutex($true, 'Local\EvoraLauncher', [ref] $createdMutex)
+$showSignal = New-Object System.Threading.EventWaitHandle($false,
+    [System.Threading.EventResetMode]::ManualReset, 'Local\EvoraLauncherShow')
+if (-not $createdMutex) {
+    [void] $showSignal.Set()
+    exit 0
+}
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
@@ -363,8 +374,16 @@ $trayQuit.Add_Click({ Stop-EvoraAndQuit })
 $notify.Add_DoubleClick({ Show-EvoraLauncher })
 
 $timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 5000
-$timer.Add_Tick({ Update-EvoraStatus; if ($copy.Text -eq 'Copied') { $copy.Text = 'Copy' }; if ($lanCopy.Text -eq 'Copied') { $lanCopy.Text = 'Copy' } })
+$timer.Interval = 1200
+$timer.Add_Tick({
+    Update-EvoraStatus
+    if ($copy.Text -eq 'Copied') { $copy.Text = 'Copy' }
+    if ($lanCopy.Text -eq 'Copied') { $lanCopy.Text = 'Copy' }
+    if ($showSignal.WaitOne(0)) {
+        [void] $showSignal.Reset()
+        Show-EvoraLauncher
+    }
+})
 $timer.Start()
 $form.Add_FormClosing({
     param($sender, $eventArgs)
@@ -395,3 +414,5 @@ Update-EvoraStatus
 # modal loop, which made Evora's native host exit and take the tray icon with
 # it.  A normal application loop continues after the form is hidden.
 [System.Windows.Forms.Application]::Run($form)
+try { $instanceLock.ReleaseMutex() } catch { }
+try { $instanceLock.Dispose(); $showSignal.Dispose() } catch { }
