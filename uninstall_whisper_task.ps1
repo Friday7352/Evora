@@ -9,12 +9,12 @@
 # =============================================================================
 
 $ErrorActionPreference = "Stop"
-$TaskName = "VoiceConsoleWhisper"
-
-$task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-if (-not $task) {
-    Write-Host "No task named '$TaskName' - nothing to undo." -ForegroundColor Yellow
-} else {
+$TaskNames = @('WhisperTranscriptionService', 'VoiceConsoleWhisper')
+$foundTask = $false
+foreach ($TaskName in $TaskNames) {
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if (-not $task) { continue }
+    $foundTask = $true
     Write-Host "Stopping '$TaskName'..."
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
@@ -32,10 +32,13 @@ if (-not $task) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
     Write-Host "Removed the scheduled task." -ForegroundColor Green
 }
+if (-not $foundTask) { Write-Host 'No Whisper startup task found - nothing to undo.' -ForegroundColor Yellow }
 
 Write-Host ""
-$fw = Read-Host "Also close the 'Remote Scheduled Tasks Management' firewall rule? (y/n)"
+$fw = Read-Host "Also close Whisper's network firewall rules? (y/n)"
 if ($fw -eq "y") {
+    Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue |
+        Remove-NetFirewallRule -ErrorAction SilentlyContinue
     Disable-NetFirewallRule -DisplayGroup "Remote Scheduled Tasks Management" -ErrorAction SilentlyContinue
     Write-Host "Firewall rule disabled." -ForegroundColor Green
 }

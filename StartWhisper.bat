@@ -11,11 +11,11 @@ REM ==========================================================================
 
 setlocal
 
-REM --- Adjust if your setup differs -----------------------------------------
-set WHISPER_DIR=C:\Users\Administrator\Desktop\Whisper
-REM Leave PYTHON_EXE blank to use whatever "python" resolves to on PATH.
-set PYTHON_EXE=
-REM --------------------------------------------------------------------------
+REM This file works both from a git checkout and after the one-click
+REM installer.  Keeping all paths relative to this file avoids the former
+REM hard-coded Administrator/Python 3.14 paths.
+set "WHISPER_DIR=%~dp0"
+set "PYTHON_EXE=%WHISPER_DIR%.venv\Scripts\python.exe"
 
 title Whisper transcription service
 
@@ -46,11 +46,20 @@ echo   Starting Whisper...
 echo   Leave this window open. Closing it stops the service.
 echo.
 
-if "%PYTHON_EXE%"=="" (
-    python whisper_server.py
-) else (
-    "%PYTHON_EXE%" whisper_server.py
+if not exist "%PYTHON_EXE%" (
+    echo.
+    echo   Whisper has not been installed yet.
+    echo   Run Install-Whisper.ps1 first, then try again.
+    echo.
+    pause
+    exit /b 1
 )
+
+set "HF_HOME=%WHISPER_DIR%model_cache"
+set "HUGGINGFACE_HUB_CACHE=%WHISPER_DIR%model_cache"
+set "TORCH_HOME=%WHISPER_DIR%model_cache"
+set "SPEECHBRAIN_CACHE=%WHISPER_DIR%ecapa_model"
+"%PYTHON_EXE%" -u whisper_server.py
 
 echo.
 echo   Whisper stopped.

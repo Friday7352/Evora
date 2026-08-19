@@ -13,9 +13,10 @@
 
 $ErrorActionPreference = "Stop"
 
-# --- Adjust these if your paths differ -------------------------------------
-$WhisperDir = "C:\Users\Administrator\Desktop\Whisper"
-$PythonExe  = "C:\Users\Administrator\AppData\Local\Python\pythoncore-3.14-64\python.exe"
+# The installer creates the virtual environment beside this script. Keeping
+# these paths relative removes the old machine-specific Python 3.14 crash.
+$WhisperDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$PythonExe  = Join-Path $WhisperDir '.venv\Scripts\python.exe'
 $TaskName   = "VoiceConsoleWhisper"
 # ---------------------------------------------------------------------------
 
@@ -56,7 +57,8 @@ $mode = Read-Host "Choose (1/2)"
 # directory, so a task running as a different account looks in a different
 # place, finds nothing, and fails to load. Naming an explicit folder means
 # every account uses the same one.
-$envPrefix = "set HF_HOME=$ModelCache&& set HUGGINGFACE_HUB_CACHE=$ModelCache&& set TORCH_HOME=$ModelCache&& "
+$EcapaCache = Join-Path $WhisperDir 'ecapa_model'
+$envPrefix = "set HF_HOME=$ModelCache&& set HUGGINGFACE_HUB_CACHE=$ModelCache&& set TORCH_HOME=$ModelCache&& set SPEECHBRAIN_CACHE=$EcapaCache&& "
 
 $action = New-ScheduledTaskAction `
     -Execute "cmd.exe" `

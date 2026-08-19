@@ -826,19 +826,32 @@ try:
 except Exception as e:
     message = str(e)
     if "cublas" in message.lower() or "cudnn" in message.lower():
-        print()
-        print("!" * 70)
-        print("The CUDA libraries couldn't be loaded:")
-        print(f"  {e}")
-        print()
-        print("Install them into this Python and they'll be picked up automatically:")
-        print(f'  "{sys.executable}" -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12')
-        print()
-        print("Or run on CPU instead — slower, but needs nothing else:")
-        print("  set WHISPER_DEVICE=cpu")
-        print("!" * 70)
-        sys.exit(1)
-    raise
+        # Auto mode is meant to be a reliable setup, not an all-or-nothing
+        # GPU promise. If the detected GPU lacks a compatible CUDA runtime,
+        # retain a working local service on CPU. An explicit cuda request
+        # still fails clearly, because the caller deliberately declined that
+        # fallback.
+        if os.environ.get("WHISPER_DEVICE", "auto").lower() == "auto":
+            print("CUDA libraries are unavailable; continuing on CPU instead.")
+            DEVICE = "cpu"
+            DEVICE_REASON = "CUDA runtime unavailable; automatic CPU fallback"
+            COMPUTE_TYPE = "int8"
+            model = WhisperModel(MODEL_NAME, device=DEVICE, compute_type=COMPUTE_TYPE)
+        else:
+            print()
+            print("!" * 70)
+            print("The CUDA libraries couldn't be loaded:")
+            print(f"  {e}")
+            print()
+            print("Install them into this Python and they'll be picked up automatically:")
+            print(f'  "{sys.executable}" -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12')
+            print()
+            print("Or run on CPU instead — slower, but needs nothing else:")
+            print("  set WHISPER_DEVICE=cpu")
+            print("!" * 70)
+            sys.exit(1)
+    else:
+        raise
 print(f"  Ready in {time.perf_counter() - _load_start:.1f}s")
 
 app = Flask(__name__)
