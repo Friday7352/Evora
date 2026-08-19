@@ -279,7 +279,7 @@ function Remove-EvoraHostsEntry {
     if ($kept.Count -ne $lines.Count) { [IO.File]::WriteAllLines($hosts, [string[]]$kept) }
 }
 
-function Register-WhisperTask([string] $Target) {
+function Register-WhisperTask([string] $Target, [bool] $StartWithWindows = $true) {
     $taskName = 'WhisperTranscriptionService'
     $python = Join-Path $Target '.venv\Scripts\python.exe'
     $log = Join-Path $Target 'whisper_service.log'
@@ -288,13 +288,13 @@ function Register-WhisperTask([string] $Target) {
     $prefix = "set HF_HOME=$cache&& set HUGGINGFACE_HUB_CACHE=$cache&& set TORCH_HOME=$cache&& set SPEECHBRAIN_CACHE=$ecapa&& "
     $command = "$prefix`"$python`" -u `"$Target\whisper_server.py`" >> `"$log`" 2>&1"
     $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument ('/c "{0}"' -f $command) -WorkingDirectory $Target
-    $trigger = New-ScheduledTaskTrigger -AtStartup
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal `
-        -Settings $settings -Description 'Local Whisper transcription service for Frivo' | Out-Null
+    $registration = @{ TaskName = $taskName; Action = $action; Principal = $principal; Settings = $settings; Description = 'Local Whisper transcription service for Frivo' }
+    if ($StartWithWindows) { $registration.Trigger = New-ScheduledTaskTrigger -AtStartup }
+    Register-ScheduledTask @registration | Out-Null
     Start-ScheduledTask -TaskName $taskName
 }
 
@@ -459,7 +459,9 @@ function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $Al
     & $OnProgress 78 'Configuring network access...'
     if ($AllowLan) { Add-WhisperFirewallRule $Target }
     & $OnProgress 88 'Finishing Evora setup...'
-    if ($StartWithWindows) { Register-WhisperTask $Target }
+    # Always register an on-demand task so the launcher can start Evora.
+    # The startup checkbox controls only whether it gets an AtStartup trigger.
+    Register-WhisperTask $Target -StartWithWindows $StartWithWindows
     $desktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
     Register-WhisperInstalledApp $Target
     if ($CreateDesktopShortcut) {

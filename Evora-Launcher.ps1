@@ -64,6 +64,49 @@ function Remove-EvoraFirewallRule {
     Get-EvoraFirewallRules | Remove-NetFirewallRule -ErrorAction SilentlyContinue
 }
 
+function Set-EvoraStartupMode([bool] $Enabled) {
+    $python = Join-Path $Root '.venv\Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+        throw 'Evora is not fully installed yet.'
+    }
+
+    $wasRunning = $false
+    try { $wasRunning = (Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop).State -eq 'Running' } catch { }
+
+    $log = Join-Path $Root 'whisper_service.log'
+    $cache = Join-Path $Root 'model_cache'
+    $ecapa = Join-Path $Root 'ecapa_model'
+    $prefix = "set HF_HOME=$cache&& set HUGGINGFACE_HUB_CACHE=$cache&& set TORCH_HOME=$cache&& set SPEECHBRAIN_CACHE=$ecapa&& "
+    $command = "$prefix`"$python`" -u `"$Root\whisper_server.py`" >> `"$log`" 2>&1"
+    $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument ('/c "{0}"' -f $command) -WorkingDirectory $Root
+    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
+
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    $registration = @{ TaskName = $TaskName; Action = $action; Principal = $principal; Settings = $settings; Description = 'Local Whisper transcription service for Frivo' }
+    if ($Enabled) { $registration.Trigger = New-ScheduledTaskTrigger -AtStartup }
+    Register-ScheduledTask @registration | Out-Null
+    if ($wasRunning) { Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop }
+}
+
+function Start-EvoraService {
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    if (-not $task.Settings.Enabled) {
+        Enable-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    }
+    Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    for ($attempt = 0; $attempt -lt 12; $attempt++) {
+        Start-Sleep -Milliseconds 250
+        if ((Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop).State -eq 'Running') { return }
+    }
+    $info = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($info -and $info.LastTaskResult -ne 0) {
+        throw ('Evora could not start (Windows task result: {0}).' -f $info.LastTaskResult)
+    }
+    throw 'Evora did not enter its running state. Open the service log for details.'
+}
+
 $requestedAction = Get-EvoraRequestedAction
 if ($requestedAction) {
     if (-not (Test-EvoraAdmin)) {
@@ -75,10 +118,10 @@ if ($requestedAction) {
         exit 0
     }
     switch ($requestedAction) {
-        'Start' { Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop }
+        'Start' { Start-EvoraService }
         'Stop' { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue }
-        'EnableStartup' { Enable-ScheduledTask -TaskName $TaskName -ErrorAction Stop }
-        'DisableStartup' { Disable-ScheduledTask -TaskName $TaskName -ErrorAction Stop }
+        'EnableStartup' { Set-EvoraStartupMode $true }
+        'DisableStartup' { Set-EvoraStartupMode $false }
         'EnableLan' {
             $python = Join-Path $Root '.venv\Scripts\python.exe'
             if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw 'Evora is not fully installed yet.' }
@@ -182,7 +225,12 @@ function ConvertTo-EvoraTitle([string] $Text) {
 }
 
 function Test-EvoraStartupEnabled {
-    try { return [bool](Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop).Settings.Enabled } catch { return $false }
+    try {
+        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+        return $null -ne @($task.Triggers | Where-Object {
+            $_.CimClass -and $_.CimClass.CimClassName -eq 'MSFT_TaskBootTrigger'
+        } | Select-Object -First 1)
+    } catch { return $false }
 }
 
 function Test-EvoraNetworkEnabled {
@@ -296,7 +344,11 @@ $copy.Add_Click({ try { [System.Windows.Forms.Clipboard]::SetText($localUrl.Text
 $lanCopy.Add_Click({ try { [System.Windows.Forms.Clipboard]::SetText($lanUrl.Text); $lanCopy.Text = 'Copied' } catch { } })
 $btnOpen.Add_Click({
     if ($btnOpen.Text -eq 'Start Evora') {
-        Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-Start')
+        $btnOpen.Enabled = $false
+        $btnOpen.Text = 'Starting Evora...'
+        [System.Windows.Forms.Application]::DoEvents()
+        $startProcess = Start-Process -FilePath 'powershell.exe' -Verb RunAs -PassThru -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-Start')
+        $startProcess.WaitForExit()
     } else { Start-Process $localUrl.Text }
     Update-EvoraStatus
 })

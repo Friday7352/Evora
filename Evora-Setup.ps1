@@ -37,7 +37,7 @@ function Get-EvoraExistingOptions([string]$Target){
   $allowLan=$false
   try{$allowLan=$null -ne (Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue | Where-Object {$app=Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $_ -ErrorAction SilentlyContinue;$app -and $app.Program -and $app.Program.Equals($python,[StringComparison]::OrdinalIgnoreCase)} | Select-Object -First 1)}catch{}
   $startWithWindows=$false
-  try{$task=Get-ScheduledTask -TaskName 'WhisperTranscriptionService' -ErrorAction Stop;$startWithWindows=[bool]$task.Settings.Enabled}catch{}
+  try{$task=Get-ScheduledTask -TaskName 'WhisperTranscriptionService' -ErrorAction Stop;$startWithWindows=$null -ne @($task.Triggers|Where-Object {$_.CimClass -and $_.CimClass.CimClassName -eq 'MSFT_TaskBootTrigger'}|Select-Object -First 1)}catch{}
   $desktopShortcut=(Test-Path -LiteralPath (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Evora.lnk')) -or (Test-Path -LiteralPath (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Evora.lnk'))
   return [pscustomobject]@{AllowLan=$allowLan;StartWithWindows=$startWithWindows;CreateDesktopShortcut=$desktopShortcut}
 }
