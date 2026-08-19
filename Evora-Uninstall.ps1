@@ -31,7 +31,11 @@ function Add-Step([string] $Text, [bool] $Ok = $true) {
     [void] $script:Steps.Add([pscustomobject]@{ Text = $Text; Ok = $Ok })
     Write-UninstallLog ('{0}{1}' -f $Text, $(if ($Ok) { '' } else { ' [FAILED]' }))
     if (-not $Ok) { [void] $script:Problems.Add($Text) }
-    if ($script:StepSink) { & $script:StepSink $Text $Ok }
+    # A failure while repainting the optional visual log must never turn a
+    # successful cleanup operation into a failed uninstall step.
+    if ($script:StepSink) {
+        try { & $script:StepSink $Text $Ok } catch { }
+    }
 }
 
 function ConvertTo-EvoraArgumentString {
@@ -269,16 +273,34 @@ $cancelButton.Add_Click({ $form.Close() })
 $removeButton.Add_Click({
     $confirm.Visible = $false; $run.Visible = $true; $header.Subtitle.Text = 'Removing...'
     [System.Windows.Forms.Application]::DoEvents()
+    # This click handler runs in a separate scope in the native host.  Keep a
+    # closed-over reference to the textbox so each progress update reaches it.
+    $runLogControl = $runLog
     $script:StepSink = {
         param($Text, $Ok)
-        $runLog.AppendText((if ($Ok) { '  ' } else { '! ' }) + $Text + "`r`n")
-        $runLog.SelectionStart = $runLog.TextLength; $runLog.ScrollToCaret()
-        [System.Windows.Forms.Application]::DoEvents()
-    }
+        try {
+            $prefix = if ($Ok) { '  ' } else { '! ' }
+            $runLogControl.AppendText($prefix + $Text + "`r`n")
+            $runLogControl.SelectionStart = $runLogControl.TextLength
+            $runLogControl.ScrollToCaret()
+            [System.Windows.Forms.Application]::DoEvents()
+        } catch { }
+    }.GetNewClosure()
     Invoke-EvoraRemoval -KeepDownloaded $keepCache.Checked
-    # Repaint from the recorded result once removal ends. This prevents a
-    # native-host timing quirk from leaving the progress card blank.
-    $runLog.Text = (($script:Steps | ForEach-Object { (if ($_.Ok) { '  ' } else { '! ' }) + $_.Text }) -join "`r`n")
+    # Repaint from the recorded result once removal ends. This also gives the
+    # user a full, dependable completion log if a live refresh was skipped.
+    try {
+        $runLogControl.Clear()
+        foreach ($step in @($script:Steps)) {
+            $prefix = if ($step.Ok) { '  ' } else { '! ' }
+            $runLogControl.AppendText($prefix + $step.Text + "`r`n")
+        }
+        if ($runLogControl.TextLength -eq 0) {
+            $runLogControl.Text = 'No removable Evora components were found.'
+        }
+        $runLogControl.SelectionStart = 0
+        $runLogControl.ScrollToCaret()
+    } catch { }
     if ($script:Problems.Count) {
         $header.Subtitle.Text = 'Finished, with problems'; $summary.ForeColor = $Theme.Warn
         $summary.Text = ('Some steps did not complete. Details were saved to:' + "`r`n" + $LogPath)
