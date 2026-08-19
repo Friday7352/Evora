@@ -11,6 +11,30 @@ param(
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSCommandPath
 $TaskName = 'WhisperTranscriptionService'
+$SettingsDirectory = Join-Path $env:APPDATA 'Evora'
+$SettingsPath = Join-Path $SettingsDirectory 'launcher.json'
+$script:launcherSettings = @{ CloseAction = 'keep' }
+$script:loadingSettings = $false
+$script:serviceRunning = $false
+
+function Read-EvoraLauncherSettings {
+    if (-not (Test-Path -LiteralPath $SettingsPath)) { return }
+    try {
+        $saved = Get-Content -LiteralPath $SettingsPath -Raw | ConvertFrom-Json
+        if ($saved.PSObject.Properties['CloseAction'] -and $saved.CloseAction -in @('keep', 'stop')) {
+            $script:launcherSettings.CloseAction = [string] $saved.CloseAction
+        }
+    } catch { }
+}
+
+function Save-EvoraLauncherSettings {
+    try {
+        New-Item -ItemType Directory -Path $SettingsDirectory -Force | Out-Null
+        [IO.File]::WriteAllText($SettingsPath, ($script:launcherSettings | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+    } catch { }
+}
+
+Read-EvoraLauncherSettings
 
 function Test-EvoraAdmin {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -117,23 +141,29 @@ $btnSettings = New-FrivoButton -Theme $Theme -Parent $viewMain -Text 'Settings' 
 $btnPower = New-FrivoButton -Theme $Theme -Parent $viewMain -Text 'Stop Evora' -X 241 -Y 300 -W 205 -H 36
 
 $btnBack = New-FrivoButton -Theme $Theme -Parent $viewSettings -Text 'Back' -X 24 -Y 4 -W 90 -H 32
-[void](New-FrivoLabel -Theme $Theme -Parent $viewSettings -Text 'STARTUP' -X 30 -Y 48 -W 380 -H 16 -Font $Theme.FontCaps -Color $Theme.Faint)
-$startupCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 24 -Y 70 -W 422 -H 62
+[void](New-FrivoLabel -Theme $Theme -Parent $viewSettings -Text 'WHEN I CLOSE THIS WINDOW' -X 30 -Y 42 -W 380 -H 16 -Font $Theme.FontCaps -Color $Theme.Faint)
+$closeCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 24 -Y 62 -W 422 -H 84
+$keepInTray = New-FrivoRadio -Theme $Theme -Parent $closeCard -Text 'Keep Evora running in the background' -X 18 -Y 7 -W 386 -Checked $true
+[void](New-FrivoLabel -Theme $Theme -Parent $closeCard -Text 'Minimizes Evora to the notification area.' -X 38 -Y 28 -W 350 -H 16 -Font $Theme.FontSmall -Color $Theme.Dim)
+$stopOnClose = New-FrivoRadio -Theme $Theme -Parent $closeCard -Text 'Stop Evora' -X 18 -Y 47 -W 386
+[void](New-FrivoLabel -Theme $Theme -Parent $closeCard -Text 'Stops the local transcription service and closes Evora.' -X 38 -Y 66 -W 360 -H 14 -Font $Theme.FontSmall -Color $Theme.Dim)
+[void](New-FrivoLabel -Theme $Theme -Parent $viewSettings -Text 'STARTUP' -X 30 -Y 156 -W 380 -H 16 -Font $Theme.FontCaps -Color $Theme.Faint)
+$startupCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 24 -Y 174 -W 422 -H 62
 $startupCheck = New-FrivoCheck -Theme $Theme -Parent $startupCard -Text 'Start Evora automatically when Windows starts' -X 18 -Y 11 -W 386 -Checked $true
 [void](New-FrivoLabel -Theme $Theme -Parent $startupCard -Text 'Keeps private transcription ready for Frivo.' -X 38 -Y 35 -W 350 -H 18 -Font $Theme.FontSmall -Color $Theme.Dim)
-$networkHeading = New-FrivoLabel -Theme $Theme -Parent $viewSettings -Text 'NETWORK ACCESS' -X 30 -Y 146 -W 380 -H 16 -Font $Theme.FontCaps -Color $Theme.Faint
-$networkCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 24 -Y 168 -W 422 -H 62
+$networkHeading = New-FrivoLabel -Theme $Theme -Parent $viewSettings -Text 'NETWORK ACCESS' -X 30 -Y 246 -W 380 -H 16 -Font $Theme.FontCaps -Color $Theme.Faint
+$networkCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 24 -Y 266 -W 422 -H 62
 $networkAction = New-FrivoButton -Theme $Theme -Parent $networkCard -Text 'Open port 9000' -X 18 -Y 13 -W 160 -H 36
 [void](New-FrivoLabel -Theme $Theme -Parent $networkCard -Text 'Lets Frivo devices on your private network connect to Evora.' -X 192 -Y 14 -W 208 -H 32 -Font $Theme.FontSmall -Color $Theme.Dim)
-$modelHeading = New-FrivoLabel -Theme $Theme -Parent $viewSettings -Text 'MODEL' -X 30 -Y 244 -W 380 -H 16 -Font $Theme.FontCaps -Color $Theme.Faint
-$activeCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 24 -Y 266 -W 200 -H 62
+$modelHeading = New-FrivoLabel -Theme $Theme -Parent $viewSettings -Text 'MODEL' -X 30 -Y 338 -W 380 -H 16 -Font $Theme.FontCaps -Color $Theme.Faint
+$activeCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 24 -Y 356 -W 200 -H 62
 [void](New-FrivoLabel -Theme $Theme -Parent $activeCard -Text 'ACTIVE MODEL' -X 18 -Y 10 -W 164 -H 14 -Font $Theme.FontCaps -Color $Theme.Faint)
 $activeModel = New-FrivoLabel -Theme $Theme -Parent $activeCard -Text 'Waiting...' -X 18 -Y 31 -W 164 -H 22 -Font $Theme.FontUI -Color $Theme.Ink
-$activeDeviceCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 236 -Y 266 -W 210 -H 62
+$activeDeviceCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 236 -Y 356 -W 210 -H 62
 [void](New-FrivoLabel -Theme $Theme -Parent $activeDeviceCard -Text 'PROCESSING' -X 18 -Y 10 -W 174 -H 14 -Font $Theme.FontCaps -Color $Theme.Faint)
 $activeDevice = New-FrivoLabel -Theme $Theme -Parent $activeDeviceCard -Text 'Waiting...' -X 18 -Y 31 -W 174 -H 22 -Font $Theme.FontUI -Color $Theme.Ink
-$btnLog = New-FrivoButton -Theme $Theme -Parent $viewSettings -Text 'View service log' -X 24 -Y 342 -W 205 -H 36
-$btnFolder = New-FrivoButton -Theme $Theme -Parent $viewSettings -Text 'Open Evora folder' -X 241 -Y 342 -W 205 -H 36
+$btnLog = New-FrivoButton -Theme $Theme -Parent $viewSettings -Text 'View service log' -X 24 -Y 434 -W 205 -H 36
+$btnFolder = New-FrivoButton -Theme $Theme -Parent $viewSettings -Text 'Open Evora folder' -X 241 -Y 434 -W 205 -H 36
 
 function ConvertTo-EvoraTitle([string] $Text) {
     if ([string]::IsNullOrWhiteSpace($Text)) { return 'Unknown' }
@@ -180,7 +210,6 @@ function Test-EvoraLocalName {
 
 $script:health = $null
 $script:nextHealthCheck = [DateTime]::MinValue
-$script:loadingSettings = $false
 
 function Set-EvoraMainNetworkState([bool] $ShowLan) {
     $lanCard.Visible = $ShowLan
@@ -197,18 +226,19 @@ function Set-EvoraMainNetworkState([bool] $ShowLan) {
 function Set-EvoraSettingsNetworkState([bool] $PortOpen) {
     $networkHeading.Visible = -not $PortOpen
     $networkCard.Visible = -not $PortOpen
-    $offset = if ($PortOpen) { -98 } else { 0 }
-    $modelHeading.Location = [System.Drawing.Point]::new(30, 244 + $offset)
-    $activeCard.Location = [System.Drawing.Point]::new(24, 266 + $offset)
-    $activeDeviceCard.Location = [System.Drawing.Point]::new(236, 266 + $offset)
-    $btnLog.Location = [System.Drawing.Point]::new(24, 342 + $offset)
-    $btnFolder.Location = [System.Drawing.Point]::new(241, 342 + $offset)
+    $offset = if ($PortOpen) { -92 } else { 0 }
+    $modelHeading.Location = [System.Drawing.Point]::new(30, 338 + $offset)
+    $activeCard.Location = [System.Drawing.Point]::new(24, 356 + $offset)
+    $activeDeviceCard.Location = [System.Drawing.Point]::new(236, 356 + $offset)
+    $btnLog.Location = [System.Drawing.Point]::new(24, 434 + $offset)
+    $btnFolder.Location = [System.Drawing.Point]::new(241, 434 + $offset)
 }
 
 function Update-EvoraStatus {
     $taskState = 'Not registered'
     try { $taskState = (Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop).State.ToString() } catch { }
     $serverUp = ($taskState -eq 'Running') -and (Test-EvoraServerUp)
+    $script:serviceRunning = ($taskState -eq 'Running')
     if ($serverUp -and [DateTime]::Now -ge $script:nextHealthCheck) {
         # Model information changes only during startup or a model change, so
         # refresh it occasionally rather than blocking every five seconds.
@@ -262,11 +292,23 @@ $btnOpen.Add_Click({
 $btnPower.Add_Click({ Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-Stop'); Update-EvoraStatus })
 $btnSettings.Add_Click({
     $script:loadingSettings = $true
+    $keepInTray.Checked = ($script:launcherSettings.CloseAction -eq 'keep')
+    $stopOnClose.Checked = ($script:launcherSettings.CloseAction -eq 'stop')
     $startupCheck.Checked = Test-EvoraStartupEnabled
     $script:loadingSettings = $false
     $viewMain.Visible = $false; $viewSettings.Visible = $true
 })
 $btnBack.Add_Click({ $viewSettings.Visible = $false; $viewMain.Visible = $true })
+$keepInTray.Add_CheckedChanged({
+    if (-not $script:loadingSettings -and $keepInTray.Checked) {
+        $script:launcherSettings.CloseAction = 'keep'; Save-EvoraLauncherSettings
+    }
+})
+$stopOnClose.Add_CheckedChanged({
+    if (-not $script:loadingSettings -and $stopOnClose.Checked) {
+        $script:launcherSettings.CloseAction = 'stop'; Save-EvoraLauncherSettings
+    }
+})
 $startupCheck.Add_CheckedChanged({
     if ($script:loadingSettings) { return }
     $action = if ($startupCheck.Checked) { '-EnableStartup' } else { '-DisableStartup' }
@@ -283,10 +325,57 @@ $networkAction.Add_Click({
 $btnLog.Add_Click({ $log = Join-Path $Root 'whisper_service.log'; if (Test-Path -LiteralPath $log) { Start-Process notepad.exe -ArgumentList ('"{0}"' -f $log) } })
 $btnFolder.Add_Click({ Start-Process explorer.exe -ArgumentList ('"{0}"' -f $Root) })
 
+# The tray behavior follows Frivo: closing can hide the window while the
+# private transcription service stays available, and the tray menu restores
+# or stops it explicitly.
+$notify = New-Object System.Windows.Forms.NotifyIcon
+$notify.Text = 'Evora'
+if (Test-Path -LiteralPath $IconPath) { try { $notify.Icon = New-Object System.Drawing.Icon($IconPath) } catch { } }
+$trayMenu = New-Object System.Windows.Forms.ContextMenuStrip
+$trayShow = $trayMenu.Items.Add('Show Evora')
+[void] $trayMenu.Items.Add('-')
+$trayQuit = $trayMenu.Items.Add('Stop Evora and quit')
+$notify.ContextMenuStrip = $trayMenu
+$notify.Visible = $true
+$script:quitting = $false
+$script:trayNoticeShown = $false
+
+function Show-EvoraLauncher {
+    $form.ShowInTaskbar = $true
+    $form.Show()
+    if ($form.WindowState -eq [System.Windows.Forms.FormWindowState]::Minimized) { $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal }
+    $form.BringToFront(); $form.Activate()
+}
+
+function Stop-EvoraAndQuit {
+    $script:quitting = $true
+    Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-Stop')
+    $form.Close()
+}
+
+$trayShow.Add_Click({ Show-EvoraLauncher })
+$trayQuit.Add_Click({ Stop-EvoraAndQuit })
+$notify.Add_DoubleClick({ Show-EvoraLauncher })
+
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 5000
 $timer.Add_Tick({ Update-EvoraStatus; if ($copy.Text -eq 'Copied') { $copy.Text = 'Copy' }; if ($lanCopy.Text -eq 'Copied') { $lanCopy.Text = 'Copy' } })
 $timer.Start()
-$form.Add_FormClosed({ $timer.Stop(); $timer.Dispose() })
+$form.Add_FormClosing({
+    param($sender, $eventArgs)
+    if ($script:quitting -or $eventArgs.CloseReason -ne [System.Windows.Forms.CloseReason]::UserClosing) { return }
+    if ($script:launcherSettings.CloseAction -eq 'keep' -and $script:serviceRunning) {
+        $eventArgs.Cancel = $true
+        $form.Hide(); $form.ShowInTaskbar = $false
+        if (-not $script:trayNoticeShown) {
+            $script:trayNoticeShown = $true
+            try { $notify.ShowBalloonTip(2500, 'Evora', 'Evora is still running. Right-click the tray icon to stop it.', [System.Windows.Forms.ToolTipIcon]::Info) } catch { }
+        }
+    } else {
+        $script:quitting = $true
+        Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-Stop')
+    }
+})
+$form.Add_FormClosed({ $timer.Stop(); $timer.Dispose(); $notify.Visible = $false; $notify.Dispose() })
 Update-EvoraStatus
 [void]$form.ShowDialog()

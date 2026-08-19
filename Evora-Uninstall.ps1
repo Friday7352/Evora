@@ -57,6 +57,24 @@ function Test-EvoraRegistryOwnership {
     } catch { return $false }
 }
 
+function Test-EvoraLegacyOwnership {
+    # Older Evora releases did not always leave the install marker behind.
+    # Only recognize the two historical default folders and Evora's own
+    # service files; never treat an arbitrary folder as safe to remove.
+    try {
+        $knownPaths = @(
+            (Join-Path $env:ProgramFiles 'Evora'),
+            (Join-Path $env:ProgramFiles 'Whisper')
+        )
+        $normalizedRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+        $known = $knownPaths | Where-Object {
+            [IO.Path]::GetFullPath($_).TrimEnd('\', '/').Equals($normalizedRoot, [StringComparison]::OrdinalIgnoreCase)
+        }
+        return $known -and (Test-Path -LiteralPath (Join-Path $Root 'whisper_server.py') -PathType Leaf) -and
+            ((Test-Path -LiteralPath (Join-Path $Root 'EvoraHost.exe') -PathType Leaf) -or (Test-Path -LiteralPath (Join-Path $Root 'Install-Whisper.ps1') -PathType Leaf))
+    } catch { return $false }
+}
+
 function Remove-EvoraHostsEntry {
     $hosts = Join-Path $env:SystemRoot 'System32\drivers\etc\hosts'
     if (-not (Test-Path -LiteralPath $hosts)) { return $false }
@@ -76,8 +94,24 @@ function Test-EvoraShortcut([string] $Path) {
     } catch { return $false }
 }
 
+function Preserve-EvoraReinstallCache {
+    $cache = Join-Path $env:ProgramData 'Evora\reinstall-cache'
+    New-Item -ItemType Directory -Path $cache -Force | Out-Null
+    $preserved = 0
+    foreach ($name in @('.venv', 'model_cache', 'ecapa_model')) {
+        $source = Join-Path $Root $name
+        $destination = Join-Path $cache $name
+        if (-not (Test-Path -LiteralPath $source)) { continue }
+        if (Test-Path -LiteralPath $destination) { Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction Stop }
+        Move-Item -LiteralPath $source -Destination $destination -Force -ErrorAction Stop
+        $preserved++
+    }
+    return $preserved
+}
+
 function Invoke-EvoraRemoval {
-    if (-not ((Test-EvoraInstallOwnership) -or (Test-EvoraRegistryOwnership))) {
+    param([bool] $KeepDownloaded = $false)
+    if (-not ((Test-EvoraInstallOwnership) -or (Test-EvoraRegistryOwnership) -or (Test-EvoraLegacyOwnership))) {
         Add-Step 'Refused to remove an unverified Evora folder' $false
         return
     }
@@ -148,6 +182,13 @@ function Invoke-EvoraRemoval {
         }
     } catch { Add-Step 'Remove the Apps & features entry' $false }
 
+    if ($KeepDownloaded) {
+        try {
+            $preserved = Preserve-EvoraReinstallCache
+            if ($preserved) { Add-Step 'Kept downloaded models and GPU libraries for a faster reinstall' }
+        } catch { Add-Step 'Keep downloaded models and GPU libraries' $false }
+    }
+
     # The running uninstaller itself holds handles on this folder.  The small
     # helper waits for this exact native-host process to exit, then removes all
     # program files, including models and virtual environment.
@@ -187,10 +228,11 @@ $header = New-FrivoHeader -Theme $Theme -Form $form -Title 'Uninstall Evora' -Su
 $confirm = New-Object System.Windows.Forms.Panel
 $confirm.Location = [Drawing.Point]::new(0, 76); $confirm.Size = [Drawing.Size]::new(500, 354); $confirm.BackColor = $Theme.Bg
 $form.Controls.Add($confirm)
-[void](New-FrivoLabel -Theme $Theme -Parent $confirm -Text 'This removes Evora, its downloaded speech models, background service, private-network access, and shortcuts.' -X 28 -Y 10 -W 444 -H 48 -Font $Theme.FontUI -Color $Theme.Dim)
-$removeCard = New-FrivoCard -Theme $Theme -Parent $confirm -X 24 -Y 72 -W 452 -H 70
+[void](New-FrivoLabel -Theme $Theme -Parent $confirm -Text 'This removes Evora, its background service, private-network access, and shortcuts.' -X 28 -Y 10 -W 444 -H 48 -Font $Theme.FontUI -Color $Theme.Dim)
+$removeCard = New-FrivoCard -Theme $Theme -Parent $confirm -X 24 -Y 72 -W 452 -H 94
 [void](New-FrivoLabel -Theme $Theme -Parent $removeCard -Text 'Evora will be removed from this computer.' -X 18 -Y 16 -W 416 -H 20 -Font $Theme.FontMid -Color $Theme.Ink)
-[void](New-FrivoLabel -Theme $Theme -Parent $removeCard -Text 'This does not change Frivo or your Windows Python installation.' -X 18 -Y 40 -W 416 -H 18 -Font $Theme.FontSmall -Color $Theme.Dim)
+[void](New-FrivoLabel -Theme $Theme -Parent $removeCard -Text 'This does not change Frivo or your Windows Python installation.' -X 18 -Y 38 -W 416 -H 18 -Font $Theme.FontSmall -Color $Theme.Dim)
+$keepCache = New-FrivoCheck -Theme $Theme -Parent $removeCard -Text 'Keep downloaded models and GPU libraries for a faster reinstall' -X 18 -Y 62 -W 416 -Checked $true
 $removeButton = New-FrivoButton -Theme $Theme -Parent $confirm -Text 'Uninstall Evora' -X 24 -Y 250 -W 452 -H 44 -Primary $true
 $cancelButton = New-FrivoButton -Theme $Theme -Parent $confirm -Text 'Cancel' -X 24 -Y 302 -W 452 -H 38
 
@@ -212,13 +254,18 @@ $removeButton.Add_Click({
         $runLog.SelectionStart = $runLog.TextLength; $runLog.ScrollToCaret()
         [System.Windows.Forms.Application]::DoEvents()
     }
-    Invoke-EvoraRemoval
+    Invoke-EvoraRemoval -KeepDownloaded $keepCache.Checked
+    if ($runLog.TextLength -eq 0) {
+        # If Windows delayed a live UI repaint, still show the completed
+        # removal record before the summary rather than an empty panel.
+        foreach ($step in $script:Steps) { $runLog.AppendText((if ($step.Ok) { '  ' } else { '! ' }) + $step.Text + "`r`n") }
+    }
     if ($script:Problems.Count) {
         $header.Subtitle.Text = 'Finished, with problems'; $summary.ForeColor = $Theme.Warn
         $summary.Text = ('Some steps did not complete. Details were saved to:' + "`r`n" + $LogPath)
     } else {
         $header.Subtitle.Text = 'Finished'
-        $summary.Text = 'Evora has been uninstalled. You can now close this window.'
+        $summary.Text = if ($keepCache.Checked) { 'Evora has been uninstalled. Downloaded models and GPU libraries were kept for a faster reinstall.' } else { 'Evora has been uninstalled. You can now close this window.' }
     }
     $closeButton.Enabled = $true
 })

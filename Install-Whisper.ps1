@@ -180,6 +180,32 @@ function Copy-ProgramFiles([string] $Destination) {
     }
 }
 
+function Get-EvoraReinstallCachePath {
+    return (Join-Path $env:ProgramData 'Evora\reinstall-cache')
+}
+
+function Restore-EvoraReinstallCache([string] $Target) {
+    # The uninstaller can preserve these exact folders.  Moving them back to
+    # the original path lets a reinstall reuse the already-downloaded GPU
+    # packages and speech models rather than downloading them again.
+    $cache = Get-EvoraReinstallCachePath
+    $restored = [ordered]@{ VenvReady = $false; ModelsRestored = $false }
+    if (-not (Test-Path -LiteralPath $cache -PathType Container)) { return [pscustomobject] $restored }
+    foreach ($name in @('.venv', 'model_cache', 'ecapa_model')) {
+        $saved = Join-Path $cache $name
+        $destination = Join-Path $Target $name
+        if ((Test-Path -LiteralPath $saved) -and -not (Test-Path -LiteralPath $destination)) {
+            Move-Item -LiteralPath $saved -Destination $destination -Force
+            if ($name -eq '.venv') { $restored.VenvReady = Test-Path -LiteralPath (Join-Path $destination 'Scripts\python.exe') -PathType Leaf }
+            if ($name -in @('model_cache', 'ecapa_model')) { $restored.ModelsRestored = $true }
+        }
+    }
+    try {
+        if (-not (Get-ChildItem -LiteralPath $cache -Force -ErrorAction Stop | Select-Object -First 1)) { Remove-Item -LiteralPath $cache -Force -ErrorAction SilentlyContinue }
+    } catch { }
+    return [pscustomobject] $restored
+}
+
 function Add-WhisperFirewallRule([string] $Target) {
     $python = Join-Path $Target '.venv\Scripts\python.exe'
     Remove-WhisperFirewallRule $Target
@@ -326,21 +352,27 @@ function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $Al
     }
     Copy-ProgramFiles $Target
     Write-WhisperInstallMarker $Target
+    $reused = Restore-EvoraReinstallCache $Target
     & $OnProgress 12 'Setting up the evora.local address...'
     try { Add-EvoraHostsEntry } catch { Write-SetupLog ('Could not add evora.local: ' + $_.Exception.Message) }
-    & $OnProgress 18 'Installing the stable Python runtime...'
-    $python = Install-Python311
-    & $OnProgress 34 'Creating Evora private Python environment...'
     $venv = Join-Path $Target '.venv'
-    if (Test-Path -LiteralPath $venv) { Remove-Item -LiteralPath $venv -Recurse -Force }
-    Invoke-Checked -FilePath $python -Arguments @('-m', 'venv', $venv) -WorkingDirectory $Target
     $venvPython = Join-Path $venv 'Scripts\python.exe'
-    if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
-        throw ('Python completed but did not create the expected private environment at: {0}' -f $venvPython)
+    if ($reused.VenvReady) {
+        & $OnProgress 18 'Reusing Evora GPU libraries from the previous installation...'
+        & $OnProgress 48 'Reusing the private Python environment...'
+    } else {
+        & $OnProgress 18 'Installing the stable Python runtime...'
+        $python = Install-Python311
+        & $OnProgress 34 'Creating Evora private Python environment...'
+        if (Test-Path -LiteralPath $venv) { Remove-Item -LiteralPath $venv -Recurse -Force }
+        Invoke-Checked -FilePath $python -Arguments @('-m', 'venv', $venv) -WorkingDirectory $Target
+        if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+            throw ('Python completed but did not create the expected private environment at: {0}' -f $venvPython)
+        }
+        & $OnProgress 48 'Installing Evora and GPU-compatible libraries. This can take several minutes...'
+        Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--upgrade', 'pip') -WorkingDirectory $Target
+        Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--no-input', '--disable-pip-version-check', '-r', 'requirements.txt') -WorkingDirectory $Target
     }
-    & $OnProgress 48 'Installing Evora and GPU-compatible libraries. This can take several minutes...'
-    Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--upgrade', 'pip') -WorkingDirectory $Target
-    Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--no-input', '--disable-pip-version-check', '-r', 'requirements.txt') -WorkingDirectory $Target
     & $OnProgress 78 'Configuring network access...'
     if ($AllowLan) { Add-WhisperFirewallRule $Target }
     & $OnProgress 88 'Finishing Evora setup...'
