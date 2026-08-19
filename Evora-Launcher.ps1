@@ -391,4 +391,7 @@ $form.Add_FormClosed({
     $timer.Stop(); $timer.Dispose(); $notify.Visible = $false; $notify.Dispose()
 })
 Update-EvoraStatus
-[void]$form.ShowDialog()
+# Frivo uses Application.Run, not ShowDialog.  Hiding a modal dialog ends its
+# modal loop, which made Evora's native host exit and take the tray icon with
+# it.  A normal application loop continues after the form is hidden.
+[System.Windows.Forms.Application]::Run($form)
