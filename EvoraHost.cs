@@ -1,38 +1,75 @@
+// Native Windows host for Evora's PowerShell UI scripts. The form runs inside
+// this executable's STA runspace, so Task Manager identifies it as Evora.
+
 using System;
-using System.Diagnostics;
+using System.IO;
+using System.Management.Automation;
+using System.Management.Automation.Runspaces;
+using System.Reflection;
 using System.Windows.Forms;
 
-internal static class EvoraHost
+[assembly: AssemblyTitle("Evora")]
+[assembly: AssemblyDescription("Evora desktop host")]
+[assembly: AssemblyCompany("Friday")]
+[assembly: AssemblyProduct("Evora")]
+[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: AssemblyFileVersion("1.0.0.0")]
+
+internal static class Program
 {
     [STAThread]
     private static int Main(string[] args)
     {
-        if (args.Length != 2 || !string.Equals(args[0], "--script", StringComparison.OrdinalIgnoreCase))
+        string script = null;
+        for (var index = 0; index < args.Length; index++)
         {
-            MessageBox.Show("Evora could not start because its launch instructions were invalid.", "Evora", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return 2;
+            if (string.Equals(args[index], "--script", StringComparison.OrdinalIgnoreCase) && index + 1 < args.Length)
+                script = args[++index];
         }
 
-        string script = args[1];
-        var startInfo = new ProcessStartInfo
+        if (string.IsNullOrWhiteSpace(script) || !File.Exists(script))
         {
-            FileName = "powershell.exe",
-            Arguments = "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File \"" + script.Replace("\"", "\\\"") + "\"",
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden
-        };
+            MessageBox.Show("Evora's startup script could not be found.", "Evora",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return 1;
+        }
+
         try
         {
-            using (Process process = Process.Start(startInfo))
+            Directory.SetCurrentDirectory(Path.GetDirectoryName(Path.GetFullPath(script)));
+            using (var runspace = RunspaceFactory.CreateRunspace())
             {
-                process.WaitForExit();
-                return process.ExitCode;
+                runspace.ApartmentState = System.Threading.ApartmentState.STA;
+                runspace.ThreadOptions = PSThreadOptions.ReuseThread;
+                runspace.Open();
+                using (var powerShell = PowerShell.Create())
+                {
+                    powerShell.Runspace = runspace;
+                    powerShell.AddScript("Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force");
+                    powerShell.Invoke();
+                    if (powerShell.HadErrors)
+                        throw new InvalidOperationException("Unable to set the process execution policy.");
+
+                    powerShell.Commands.Clear();
+                    powerShell.Streams.Error.Clear();
+                    powerShell.AddCommand(script);
+                    powerShell.Invoke();
+                    if (powerShell.HadErrors)
+                    {
+                        var message = "Evora could not start.";
+                        if (powerShell.Streams.Error.Count > 0)
+                            message += "\r\n\r\n" + powerShell.Streams.Error[0];
+                        MessageBox.Show(message, "Evora", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return 1;
+                    }
+                }
             }
+            return 0;
         }
         catch (Exception error)
         {
-            MessageBox.Show("Evora could not start.\r\n\r\n" + error.Message, "Evora", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("Evora could not start.\r\n\r\n" + error.Message, "Evora",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
         }
     }
