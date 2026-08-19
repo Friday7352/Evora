@@ -201,9 +201,9 @@ function Invoke-EvoraRemoval {
 }
 
 if (-not (Test-EvoraAdministrator)) {
-    $host = Join-Path $Root 'EvoraSetupHost.exe'
+    $setupHost = Join-Path $Root 'EvoraSetupHost.exe'
     try {
-        Start-Process -FilePath $host -Verb RunAs -WindowStyle Hidden -ArgumentList @('--script', ('"{0}"' -f $PSCommandPath)) | Out-Null
+        Start-Process -FilePath $setupHost -Verb RunAs -WindowStyle Hidden -ArgumentList @('--script', ('"{0}"' -f $PSCommandPath)) | Out-Null
     } catch {
         Add-Type -AssemblyName System.Windows.Forms
         [System.Windows.Forms.MessageBox]::Show('Administrator privileges are required to uninstall Evora.', 'Uninstall Evora', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
