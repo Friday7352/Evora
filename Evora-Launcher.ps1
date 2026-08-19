@@ -132,21 +132,8 @@ $activeModel = New-FrivoLabel -Theme $Theme -Parent $activeCard -Text 'Waiting..
 $activeDeviceCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 236 -Y 266 -W 210 -H 62
 [void](New-FrivoLabel -Theme $Theme -Parent $activeDeviceCard -Text 'PROCESSING' -X 18 -Y 10 -W 174 -H 14 -Font $Theme.FontCaps -Color $Theme.Faint)
 $activeDevice = New-FrivoLabel -Theme $Theme -Parent $activeDeviceCard -Text 'Waiting...' -X 18 -Y 31 -W 174 -H 22 -Font $Theme.FontUI -Color $Theme.Ink
-$downloadHeading = New-FrivoLabel -Theme $Theme -Parent $viewSettings -Text 'DOWNLOADED MODELS' -X 30 -Y 342 -W 380 -H 16 -Font $Theme.FontCaps -Color $Theme.Faint
-$cachedCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 24 -Y 364 -W 422 -H 54
-$cachedModels = New-FrivoLabel -Theme $Theme -Parent $cachedCard -Text 'Checking model cache...' -X 18 -Y 16 -W 386 -H 22 -Font $Theme.FontSmall -Color $Theme.Dim
-$btnLog = New-FrivoButton -Theme $Theme -Parent $viewSettings -Text 'View service log' -X 24 -Y 434 -W 205 -H 36
-$btnFolder = New-FrivoButton -Theme $Theme -Parent $viewSettings -Text 'Open Evora folder' -X 241 -Y 434 -W 205 -H 36
-
-function Get-CachedModelNames {
-    $cache = Join-Path $Root 'model_cache'
-    if (-not (Test-Path -LiteralPath $cache -PathType Container)) { return @() }
-    $names = New-Object System.Collections.Generic.List[string]
-    Get-ChildItem -LiteralPath $cache -Directory -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
-        if ($_.Name -match 'faster-whisper-(.+)$') { [void]$names.Add($Matches[1]) }
-    }
-    return @($names | Sort-Object -Unique)
-}
+$btnLog = New-FrivoButton -Theme $Theme -Parent $viewSettings -Text 'View service log' -X 24 -Y 342 -W 205 -H 36
+$btnFolder = New-FrivoButton -Theme $Theme -Parent $viewSettings -Text 'Open Evora folder' -X 241 -Y 342 -W 205 -H 36
 
 function ConvertTo-EvoraTitle([string] $Text) {
     if ([string]::IsNullOrWhiteSpace($Text)) { return 'Unknown' }
@@ -191,8 +178,6 @@ function Test-EvoraLocalName {
     try { return $null -ne ([System.Net.Dns]::GetHostAddresses('evora.local') | Where-Object { $_.ToString().StartsWith('127.') } | Select-Object -First 1) } catch { return $false }
 }
 
-$script:cachedModelText = 'Checking model cache...'
-$script:nextModelCacheScan = [DateTime]::MinValue
 $script:health = $null
 $script:nextHealthCheck = [DateTime]::MinValue
 $script:loadingSettings = $false
@@ -216,10 +201,8 @@ function Set-EvoraSettingsNetworkState([bool] $PortOpen) {
     $modelHeading.Location = [System.Drawing.Point]::new(30, 244 + $offset)
     $activeCard.Location = [System.Drawing.Point]::new(24, 266 + $offset)
     $activeDeviceCard.Location = [System.Drawing.Point]::new(236, 266 + $offset)
-    $downloadHeading.Location = [System.Drawing.Point]::new(30, 342 + $offset)
-    $cachedCard.Location = [System.Drawing.Point]::new(24, 364 + $offset)
-    $btnLog.Location = [System.Drawing.Point]::new(24, 434 + $offset)
-    $btnFolder.Location = [System.Drawing.Point]::new(241, 434 + $offset)
+    $btnLog.Location = [System.Drawing.Point]::new(24, 342 + $offset)
+    $btnFolder.Location = [System.Drawing.Point]::new(241, 342 + $offset)
 }
 
 function Update-EvoraStatus {
@@ -234,12 +217,6 @@ function Update-EvoraStatus {
     }
     if (-not $serverUp) { $script:health = $null; $script:nextHealthCheck = [DateTime]::MinValue }
     $health = $script:health
-    if ([DateTime]::Now -ge $script:nextModelCacheScan) {
-        $cached = @(Get-CachedModelNames)
-        $script:cachedModelText = if ($cached.Count) { (($cached | ForEach-Object { ConvertTo-EvoraTitle $_ }) -join ', ') } else { 'No downloaded speech models found yet.' }
-        $script:nextModelCacheScan = [DateTime]::Now.AddSeconds(30)
-    }
-    $cachedModels.Text = $script:cachedModelText
     $localAddress = if (Test-EvoraLocalName) { 'http://evora.local:9000' } else { 'http://localhost:9000' }
     $localUrl.Text = $localAddress
     $lanAddress = Get-EvoraLanIp
