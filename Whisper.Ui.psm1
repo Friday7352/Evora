@@ -1,7 +1,7 @@
-# Frivo — shared window styling
+# Evora — shared window styling
 # ------------------------------------------------------------------
-# The dark surfaces and red accent from static/style.css, as WinForms
-# helpers. Used by the installer and the uninstaller so every Frivo
+# The dark surfaces and purple accent used by Evora's WinForms
+# windows. Used by the installer and launcher so every Evora
 # window looks like the same product.
 #
 # The calling script loads WinForms; tests can provide stubs instead.
@@ -98,9 +98,9 @@ function Get-FrivoTheme {
         Ink     = [System.Drawing.Color]::FromArgb(232, 238, 247)  # --ink
         Dim     = [System.Drawing.Color]::FromArgb(154, 163, 178)
         Faint   = [System.Drawing.Color]::FromArgb(110, 119, 134)
-        Accent  = [System.Drawing.Color]::FromArgb(250, 47, 47)    # --accent
-        AccentH = [System.Drawing.Color]::FromArgb(255, 82, 82)
-        AccentP = [System.Drawing.Color]::FromArgb(216, 31, 31)
+        Accent  = [System.Drawing.Color]::FromArgb(169, 78, 255)
+        AccentH = [System.Drawing.Color]::FromArgb(198, 126, 255)
+        AccentP = [System.Drawing.Color]::FromArgb(124, 48, 201)
         Signal  = [System.Drawing.Color]::FromArgb(62, 207, 109)   # --signal
         Warn    = [System.Drawing.Color]::FromArgb(240, 166, 60)   # --warn
         # Standard Segoe UI is available on every supported Windows release;
@@ -172,7 +172,8 @@ function New-FrivoForm {
         [Parameter(Mandatory)] $Theme,
         [string] $Title,
         [int] $Width, [int] $Height,
-        [string] $IconPath
+        [string] $IconPath,
+        [string] $AppId = 'Evora.Desktop'
     )
     $f = New-Object System.Windows.Forms.Form
     $f.Text            = $Title
@@ -206,7 +207,7 @@ function New-FrivoForm {
     $f.Add_Shown($bringForwardOnce)
     if ($IconPath -and (Test-Path -LiteralPath $IconPath)) {
         try { $f.Icon = New-Object System.Drawing.Icon($IconPath) } catch { }
-        Set-FrivoTaskbarIcon -Form $f -IconPath $IconPath -AppId 'Frivo.Setup'
+        Set-FrivoTaskbarIcon -Form $f -IconPath $IconPath -AppId $AppId
     }
     return $f
 }
