@@ -184,14 +184,15 @@ function Get-EvoraReinstallCachePath {
     return (Join-Path $env:ProgramData 'Evora\reinstall-cache')
 }
 
-function Restore-EvoraReinstallCache([string] $Target) {
+function Restore-EvoraReinstallCache([string] $Target, [switch] $SkipPythonEnvironment) {
     # The uninstaller can preserve these exact folders.  Moving them back to
     # the original path lets a reinstall reuse the already-downloaded GPU
     # packages and speech models rather than downloading them again.
     $cache = Get-EvoraReinstallCachePath
     $restored = [ordered]@{ VenvReady = $false; ModelsRestored = $false }
     if (-not (Test-Path -LiteralPath $cache -PathType Container)) { return [pscustomobject] $restored }
-    foreach ($name in @('.venv', 'model_cache', 'ecapa_model')) {
+    $cacheItems = if ($SkipPythonEnvironment) { @('model_cache', 'ecapa_model') } else { @('.venv', 'model_cache', 'ecapa_model') }
+    foreach ($name in $cacheItems) {
         $saved = Join-Path $cache $name
         $destination = Join-Path $Target $name
         if ((Test-Path -LiteralPath $saved) -and -not (Test-Path -LiteralPath $destination)) {
@@ -352,13 +353,18 @@ function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $Al
     }
     Copy-ProgramFiles $Target
     Write-WhisperInstallMarker $Target
-    $reused = Restore-EvoraReinstallCache $Target
+    # Update preserves an existing private environment.  Repair deliberately
+    # creates a fresh one, so it never restores cached GPU libraries.
+    $reused = Restore-EvoraReinstallCache $Target -SkipPythonEnvironment:$Repair
     & $OnProgress 12 'Setting up the evora.local address...'
     try { Add-EvoraHostsEntry } catch { Write-SetupLog ('Could not add evora.local: ' + $_.Exception.Message) }
     $venv = Join-Path $Target '.venv'
     $venvPython = Join-Path $venv 'Scripts\python.exe'
+    if (-not $Repair -and -not $reused.VenvReady -and (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+        $reused.VenvReady = $true
+    }
     if ($reused.VenvReady) {
-        & $OnProgress 18 'Reusing Evora GPU libraries from the previous installation...'
+        & $OnProgress 18 'Keeping installed Evora GPU libraries...'
         & $OnProgress 48 'Reusing the private Python environment...'
     } else {
         & $OnProgress 18 'Installing the stable Python runtime...'
