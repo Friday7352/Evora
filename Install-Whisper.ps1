@@ -73,14 +73,25 @@ function Get-EvoraEnvironmentSignature {
     return ('python-{0};requirements-sha256-{1}' -f $script:RequiredPythonRuntime, $requirementsHash)
 }
 
-function Test-EvoraEnvironmentCompatible([string] $Path) {
+function Get-EvoraEnvironmentCompatibility([string] $Path) {
     try {
-        if (-not (Test-Path -LiteralPath (Join-Path $Path '.venv\Scripts\python.exe') -PathType Leaf)) { return $false }
+        if (-not (Test-Path -LiteralPath (Join-Path $Path '.venv\Scripts\python.exe') -PathType Leaf)) {
+            return [pscustomobject]@{ Compatible = $false; Reason = 'Missing' }
+        }
         $markerPath = Get-WhisperInstallMarkerPath $Path
         $marker = Get-Content -LiteralPath $markerPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        return -not [string]::IsNullOrWhiteSpace([string] $marker.EnvironmentSignature) -and
-            ([string] $marker.EnvironmentSignature -eq (Get-EvoraEnvironmentSignature))
-    } catch { return $false }
+        if ([string]::IsNullOrWhiteSpace([string] $marker.EnvironmentSignature)) {
+            return [pscustomobject]@{ Compatible = $false; Reason = 'Untracked' }
+        }
+        if ([string] $marker.EnvironmentSignature -eq (Get-EvoraEnvironmentSignature)) {
+            return [pscustomobject]@{ Compatible = $true; Reason = 'Current' }
+        }
+        return [pscustomobject]@{ Compatible = $false; Reason = 'Changed' }
+    } catch { return [pscustomobject]@{ Compatible = $false; Reason = 'Untracked' } }
+}
+
+function Test-EvoraEnvironmentCompatible([string] $Path) {
+    return [bool](Get-EvoraEnvironmentCompatibility $Path).Compatible
 }
 
 function Write-WhisperInstallMarker([string] $Path) {
