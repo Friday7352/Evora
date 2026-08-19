@@ -1,7 +1,7 @@
 Option Explicit
 
-' Legacy entry point for Evora Setup. PowerShell handles the
-' UAC prompt and opens the actual installer window; WScript keeps a console
+' Silent, double-click entry point for Evora Setup. PowerShell handles the
+' UAC prompt and opens the installer window; WScript prevents a console
 ' window from appearing behind it.
 Dim shell, fileSystem, folder, setupScript, arguments
 Set shell = CreateObject("WScript.Shell")

@@ -164,7 +164,7 @@ function Copy-ProgramFiles([string] $Destination) {
         '.gitattributes', '.gitignore', 'LICENSE', 'README.md', 'requirements.txt',
         'whisper_server.py', 'StartWhisper.bat', 'install_whisper_task.ps1',
         'uninstall_whisper_task.ps1', 'Install-Whisper.ps1', 'Install-Whisper.cmd', 'Install-Whisper.vbs',
-        'Uninstall-Whisper.vbs', 'Whisper-Launcher.ps1', 'Whisper-Launcher.vbs', 'Whisper.Ui.psm1', 'Evora-Setup.ps1', 'Evora.png'
+        'Uninstall-Whisper.vbs', 'Whisper-Launcher.ps1', 'Whisper-Launcher.vbs', 'Whisper.Ui.psm1', 'Evora-Setup.ps1', 'Evora-Setup.vbs', 'Evora.png'
     )
     foreach ($name in $keep) {
         $from = Join-Path $SourceDir $name

@@ -6,7 +6,7 @@ can stay on your computer or LAN rather than being sent to a cloud service.
 
 ## Install on Windows
 
-Double-click **Install-Whisper.vbs**. It opens the Evora setup window without a
+Double-click **Evora-Setup.vbs**. It opens the Evora setup window without a
 Command Prompt window. The
 setup window installs an isolated **Python 3.11** environment, the required
 Evora and speaker-labelling packages, a private-network firewall rule, and
