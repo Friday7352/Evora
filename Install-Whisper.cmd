@@ -1,4 +1,4 @@
 @echo off
-REM Double-click entry point for Whisper Setup.  It bypasses a restrictive
-REM local execution policy only for this signed-in user's installer process.
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install-Whisper.ps1"
+REM Legacy entry point. For no Command Prompt window, double-click
+REM Install-Whisper.vbs instead.
+wscript.exe "%~dp0Install-Whisper.vbs"

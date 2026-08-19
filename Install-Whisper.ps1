@@ -26,22 +26,78 @@ $admin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdent
     [Security.Principal.WindowsBuiltInRole]::Administrator
 )
 if (-not $admin) {
-    $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath))
+    $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath))
     if ($Silent) { $arguments += '-Silent' }
     if ($InstallPath) { $arguments += @('-InstallPath', ('"{0}"' -f $InstallPath)) }
-    Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $arguments
+    Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -ArgumentList $arguments
     exit 0
 }
 
 $SourceDir = Split-Path -Parent $PSCommandPath
 $LogPath = Join-Path ([IO.Path]::GetTempPath()) 'Whisper-Setup.log'
+$script:InstallMarkerName = '.whisper-install.json'
+$script:InstallMarkerId = 'com.frivo.whisper'
 
 function Write-SetupLog([string] $Message) {
     $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     Add-Content -LiteralPath $LogPath -Value ("[{0}] {1}" -f $stamp, $Message) -Encoding utf8
 }
 
+function Get-WhisperInstallMarkerPath([string] $Path) {
+    return Join-Path $Path $script:InstallMarkerName
+}
+
+function Test-WhisperInstallOwnership([string] $Path) {
+    try {
+        $markerPath = Get-WhisperInstallMarkerPath $Path
+        if (-not (Test-Path -LiteralPath $markerPath -PathType Leaf)) { return $false }
+        $marker = Get-Content -LiteralPath $markerPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ([string]$marker.Id -ne $script:InstallMarkerId) { return $false }
+        $actual = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+        $recorded = [IO.Path]::GetFullPath([string]$marker.InstallPath).TrimEnd('\', '/')
+        return $actual.Equals($recorded, [StringComparison]::OrdinalIgnoreCase)
+    } catch { return $false }
+}
+
+function Write-WhisperInstallMarker([string] $Path) {
+    $marker = [ordered]@{
+        Id = $script:InstallMarkerId
+        InstallPath = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+        CreatedUtc = [DateTime]::UtcNow.ToString('o')
+    }
+    [IO.File]::WriteAllText((Get-WhisperInstallMarkerPath $Path), ($marker | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+}
+
+function Test-WhisperRecoverableResidue([string] $Path) {
+    # Older setup versions did not write a marker. Only recognize their known
+    # default folder and their own program files; never claim arbitrary files.
+    try {
+        $default = [IO.Path]::GetFullPath((Join-Path $env:ProgramFiles 'Whisper')).TrimEnd('\', '/')
+        $actual = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+        if (-not $actual.Equals($default, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+        return (Test-Path -LiteralPath (Join-Path $actual 'whisper_server.py') -PathType Leaf) -or
+            (Test-Path -LiteralPath (Join-Path $actual 'Install-Whisper.ps1') -PathType Leaf)
+    } catch { return $false }
+}
+
+function Get-ExistingWhisperInstall([string] $Path) {
+    if (Test-WhisperInstallOwnership $Path) {
+        $state = if (Test-Path -LiteralPath (Join-Path $Path '.venv\Scripts\python.exe') -PathType Leaf) { 'Installed' } else { 'Partial' }
+        return [pscustomobject]@{ State = $state; Path = $Path; Owned = $true }
+    }
+    if (Test-WhisperRecoverableResidue $Path) {
+        return [pscustomobject]@{ State = 'Partial'; Path = $Path; Owned = $false }
+    }
+    return [pscustomobject]@{ State = 'None'; Path = $Path; Owned = $false }
+}
+
 function Invoke-Checked([string] $FilePath, [string[]] $Arguments, [string] $WorkingDirectory) {
+    if ([string]::IsNullOrWhiteSpace($FilePath) -or -not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
+        throw ('Setup could not find the required program: {0}' -f $FilePath)
+    }
+    if (-not (Test-Path -LiteralPath $WorkingDirectory -PathType Container)) {
+        throw ('Setup could not find its working folder: {0}' -f $WorkingDirectory)
+    }
     Write-SetupLog ('RUN {0} {1}' -f $FilePath, ($Arguments -join ' '))
     $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -WorkingDirectory $WorkingDirectory `
         -Wait -PassThru -NoNewWindow
@@ -52,16 +108,20 @@ function Find-Python311 {
     $py = Get-Command py.exe -ErrorAction SilentlyContinue
     if ($py) {
         try {
-            & $py.Source -3.11 -c 'import sys; print(sys.executable)' 2>$null | Select-Object -First 1 | ForEach-Object {
-                if ($_ -and (Test-Path -LiteralPath $_)) { return $_.Trim() }
+            $reported = @(& $py.Source -3.11 -c 'import sys; print(sys.executable)' 2>$null | Select-Object -First 1)
+            if ($reported.Count -eq 1) {
+                $candidate = $reported[0].ToString().Trim()
+                if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $candidate }
             }
         } catch { }
     }
-    $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LocalAppData) | Where-Object { $_ }
-    foreach ($root in $roots) {
-        $candidate = Get-ChildItem -LiteralPath $root -Filter python.exe -File -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match 'Python311|Python3\.11' } | Select-Object -First 1
-        if ($candidate) { return $candidate.FullName }
+    $locations = @(
+        (Join-Path $env:ProgramFiles 'Python311\python.exe'),
+        (Join-Path $env:LocalAppData 'Programs\Python\Python311\python.exe')
+    )
+    if (${env:ProgramFiles(x86)}) { $locations += Join-Path ${env:ProgramFiles(x86)} 'Python311\python.exe' }
+    foreach ($candidate in $locations) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
     }
     return $null
 }
@@ -91,7 +151,7 @@ function Copy-ProgramFiles([string] $Destination) {
     $keep = @(
         '.gitattributes', '.gitignore', 'LICENSE', 'README.md', 'requirements.txt',
         'whisper_server.py', 'StartWhisper.bat', 'install_whisper_task.ps1',
-        'uninstall_whisper_task.ps1', 'Install-Whisper.ps1', 'Install-Whisper.cmd'
+        'uninstall_whisper_task.ps1', 'Install-Whisper.ps1', 'Install-Whisper.cmd', 'Install-Whisper.vbs'
     )
     foreach ($name in $keep) {
         $from = Join-Path $SourceDir $name
@@ -128,6 +188,35 @@ function Register-WhisperTask([string] $Target) {
     Start-ScheduledTask -TaskName $taskName
 }
 
+function Remove-WhisperRuntime([string] $Target) {
+    # Used by repair/reinstall. Models are deliberately retained, while the
+    # Python environment and machine-wide service registration are rebuilt.
+    Stop-ScheduledTask -TaskName 'WhisperTranscriptionService' -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName 'WhisperTranscriptionService' -Confirm:$false -ErrorAction SilentlyContinue
+    Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue |
+        Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    $venv = Join-Path $Target '.venv'
+    if (Test-Path -LiteralPath $venv -PathType Container) {
+        Remove-Item -LiteralPath $venv -Recurse -Force -ErrorAction Stop
+    }
+}
+
+function Uninstall-Whisper([string] $Target) {
+    $existing = Get-ExistingWhisperInstall $Target
+    if ($existing.State -eq 'None') {
+        throw 'Setup will only uninstall a Whisper folder that it previously created.'
+    }
+    $source = [IO.Path]::GetFullPath($SourceDir).TrimEnd('\', '/')
+    $installed = [IO.Path]::GetFullPath($Target).TrimEnd('\', '/')
+    if ($source.Equals($installed, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Setup is running from the folder being uninstalled. Run the downloaded installer from a different folder, then try again.'
+    }
+    Write-SetupLog ('Uninstalling Whisper from ' + $installed)
+    Remove-WhisperRuntime $Target
+    Remove-Item -LiteralPath $installed -Recurse -Force -ErrorAction Stop
+    Write-SetupLog 'Whisper uninstall completed.'
+}
+
 function New-Shortcut([string] $Target, [string] $Link, [string] $WorkingDirectory) {
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($Link)
@@ -137,9 +226,14 @@ function New-Shortcut([string] $Target, [string] $Link, [string] $WorkingDirecto
     $shortcut.Save()
 }
 
-function Install-Whisper([scriptblock] $OnProgress, [bool] $AllowLan = $true) {
+function Install-Whisper([scriptblock] $OnProgress, [bool] $AllowLan = $true, [switch] $Repair) {
     & $OnProgress 5 'Preparing Whisper…'
+    if ($Repair) {
+        & $OnProgress 10 'Preparing the previous Whisper installation…'
+        Remove-WhisperRuntime $InstallPath
+    }
     Copy-ProgramFiles $InstallPath
+    Write-WhisperInstallMarker $InstallPath
     & $OnProgress 18 'Installing the stable Python runtime…'
     $python = Install-Python311
     & $OnProgress 34 'Creating Whisper’s private Python environment…'
@@ -163,6 +257,8 @@ if ($Silent) {
     try { Install-Whisper -OnProgress { param($percent, $message) Write-Host ("{0}%  {1}" -f $percent, $message) }; exit 0 }
     catch { Write-Error $_; exit 1 }
 }
+
+$script:ExistingInstall = Get-ExistingWhisperInstall $InstallPath
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -281,6 +377,37 @@ labelling tools, opens private-network access for Frivo, and starts Whisper
 automatically after Windows restarts. The first launch downloads the model.
 "@
 $panel.Controls.Add($summary)
+$repairOption = $null
+$uninstallOption = $null
+if ($script:ExistingInstall.State -ne 'None') {
+    $summary.Font=[Drawing.Font]::new('Segoe UI',9)
+    if ($script:ExistingInstall.State -eq 'Installed') {
+        $summary.Text = "Whisper is already installed at:`r`n$($script:ExistingInstall.Path)`r`n`r`nChoose what you would like to do."
+    } else {
+        $summary.Text = "A previous Whisper installation did not complete at:`r`n$($script:ExistingInstall.Path)`r`n`r`nSetup can repair it or remove the incomplete files."
+    }
+    $repairOption = New-Object Windows.Forms.RadioButton
+    $repairOption.Location=[Drawing.Point]::new(20,82); $repairOption.Size=[Drawing.Size]::new(532,22)
+    $repairOption.Text=if($script:ExistingInstall.State -eq 'Installed'){'Repair or reinstall'}else{'Clean up and install'}
+    $repairOption.Checked=$true; $repairOption.ForeColor=$ink; $repairOption.BackColor=$surface
+    $repairOption.Font=[Drawing.Font]::new('Segoe UI',9)
+    $panel.Controls.Add($repairOption)
+    $repairNote = New-Object Windows.Forms.Label
+    $repairNote.Location=[Drawing.Point]::new(40,105); $repairNote.Size=[Drawing.Size]::new(505,25)
+    $repairNote.Text='Rebuilds the Python environment and service. Downloaded models are kept.'
+    $repairNote.ForeColor=$dim; $repairNote.BackColor=$surface; $repairNote.Font=[Drawing.Font]::new('Segoe UI',8.5)
+    $panel.Controls.Add($repairNote)
+    $uninstallOption = New-Object Windows.Forms.RadioButton
+    $uninstallOption.Location=[Drawing.Point]::new(20,140); $uninstallOption.Size=[Drawing.Size]::new(532,22)
+    $uninstallOption.Text='Uninstall Whisper'; $uninstallOption.ForeColor=$ink; $uninstallOption.BackColor=$surface
+    $uninstallOption.Font=[Drawing.Font]::new('Segoe UI',9)
+    $panel.Controls.Add($uninstallOption)
+    $uninstallNote = New-Object Windows.Forms.Label
+    $uninstallNote.Location=[Drawing.Point]::new(40,163); $uninstallNote.Size=[Drawing.Size]::new(505,25)
+    $uninstallNote.Text='Removes the Whisper program, virtual environment, downloaded models, and service.'
+    $uninstallNote.ForeColor=$dim; $uninstallNote.BackColor=$surface; $uninstallNote.Font=[Drawing.Font]::new('Segoe UI',8.5)
+    $panel.Controls.Add($uninstallNote)
+}
 $track = New-Object Windows.Forms.Panel
 $track.Location=[Drawing.Point]::new(28,324); $track.Size=[Drawing.Size]::new(564,10); $track.BackColor=$card
 Set-WhisperRounded $track 10; $form.Controls.Add($track)
@@ -303,7 +430,17 @@ $install.Add_Click({
     if ($script:completed) { $form.Close(); return }
     $install.Enabled=$false; $cancel.Enabled=$false
     try {
-        Install-Whisper -OnProgress {
+        if ($script:ExistingInstall.State -ne 'None' -and $uninstallOption.Checked) {
+            $status.Text = 'Removing Whisper…'
+            [System.Windows.Forms.Application]::DoEvents()
+            Uninstall-Whisper $script:ExistingInstall.Path
+            $summary.Text = 'Whisper has been removed from this computer.'
+            if ($repairOption) { $repairOption.Visible=$false; $uninstallOption.Visible=$false; $repairNote.Visible=$false; $uninstallNote.Visible=$false }
+            $status.Text='Uninstall complete.'; $install.Text='Close'; $script:completed=$true; $install.Enabled=$true
+            return
+        }
+        $repair = ($script:ExistingInstall.State -ne 'None' -and $repairOption.Checked)
+        Install-Whisper -Repair:$repair -OnProgress {
             param($percent,$message)
             # $OnProgress is the callback parameter inside Install-Whisper.
             # This separate name avoids the old self-reference crash here.
