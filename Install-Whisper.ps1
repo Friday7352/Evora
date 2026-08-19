@@ -337,23 +337,28 @@ function Stop-EvoraLauncherForUpdate([string] $Target) {
     )
     $hosts = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
         $processInfo = $_
-        if ($processInfo.Name -notin @('EvoraHost.exe', 'Evora.exe') -or -not $processInfo.ExecutablePath) { return $false }
-        foreach ($hostPath in $hostPaths) {
-            if ($hostPath.Equals($processInfo.ExecutablePath, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+        $matchesTarget = $false
+        if ($processInfo.Name -in @('EvoraHost.exe', 'Evora.exe') -and $processInfo.ExecutablePath) {
+            foreach ($hostPath in $hostPaths) {
+                if ($hostPath.Equals($processInfo.ExecutablePath, [StringComparison]::OrdinalIgnoreCase)) {
+                    $matchesTarget = $true
+                    break
+                }
+            }
         }
-        return $false
+        $matchesTarget
     })
-    foreach ($host in $hosts) {
+    foreach ($hostProcess in $hosts) {
         try {
-            $process = Get-Process -Id $host.ProcessId -ErrorAction Stop
+            $process = Get-Process -Id $hostProcess.ProcessId -ErrorAction Stop
             [void] $process.CloseMainWindow()
         } catch { }
     }
     if ($hosts.Count) { Start-Sleep -Milliseconds 600 }
     $closed = 0
-    foreach ($host in $hosts) {
+    foreach ($hostProcess in $hosts) {
         try {
-            $process = Get-Process -Id $host.ProcessId -ErrorAction Stop
+            $process = Get-Process -Id $hostProcess.ProcessId -ErrorAction Stop
             Stop-Process -Id $process.Id -Force -ErrorAction Stop
             $closed++
         } catch { }
