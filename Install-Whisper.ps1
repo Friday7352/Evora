@@ -1,5 +1,5 @@
 <#
-  Whisper — one-click Windows installer
+  Whisper - one-click Windows installer
 
   Uses an isolated CPython 3.11 environment.  The former setup pointed at
   Python 3.14, for which the Windows GPU/speaker packages were not a stable
@@ -10,6 +10,7 @@
 [CmdletBinding()]
 param(
     [switch] $Silent,
+    [switch] $Uninstall,
     [string] $InstallPath = (Join-Path $env:ProgramFiles 'Whisper')
 )
 
@@ -28,6 +29,7 @@ $admin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdent
 if (-not $admin) {
     $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath))
     if ($Silent) { $arguments += '-Silent' }
+    if ($Uninstall) { $arguments += '-Uninstall' }
     if ($InstallPath) { $arguments += @('-InstallPath', ('"{0}"' -f $InstallPath)) }
     Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -ArgumentList $arguments
     exit 0
@@ -159,7 +161,8 @@ function Copy-ProgramFiles([string] $Destination) {
     $keep = @(
         '.gitattributes', '.gitignore', 'LICENSE', 'README.md', 'requirements.txt',
         'whisper_server.py', 'StartWhisper.bat', 'install_whisper_task.ps1',
-        'uninstall_whisper_task.ps1', 'Install-Whisper.ps1', 'Install-Whisper.cmd', 'Install-Whisper.vbs'
+        'uninstall_whisper_task.ps1', 'Install-Whisper.ps1', 'Install-Whisper.cmd', 'Install-Whisper.vbs',
+        'Uninstall-Whisper.vbs', 'Whisper-Launcher.ps1', 'Whisper-Launcher.vbs', 'Whisper.Ui.psm1'
     )
     foreach ($name in $keep) {
         $from = Join-Path $SourceDir $name
@@ -196,6 +199,23 @@ function Register-WhisperTask([string] $Target) {
     Start-ScheduledTask -TaskName $taskName
 }
 
+function Register-WhisperInstalledApp([string] $Target) {
+    $key = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Whisper'
+    $uninstaller = Join-Path $Target 'Uninstall-Whisper.vbs'
+    New-Item -Path $key -Force | Out-Null
+    New-ItemProperty -Path $key -Name 'DisplayName' -Value 'Whisper for Frivo' -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $key -Name 'DisplayVersion' -Value '1.0' -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $key -Name 'Publisher' -Value 'Frivo' -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $key -Name 'InstallLocation' -Value $Target -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $key -Name 'UninstallString' -Value ('wscript.exe "{0}"' -f $uninstaller) -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $key -Name 'DisplayIcon' -Value (Join-Path $Target 'Whisper-Launcher.vbs') -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $key -Name 'NoModify' -Value 1 -PropertyType DWord -Force | Out-Null
+}
+
+function Remove-WhisperInstalledApp {
+    Remove-Item -LiteralPath 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Whisper' -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 function Remove-WhisperRuntime([string] $Target) {
     # Used by repair/reinstall. Models are deliberately retained, while the
     # Python environment and machine-wide service registration are rebuilt.
@@ -221,6 +241,8 @@ function Uninstall-Whisper([string] $Target) {
     }
     Write-SetupLog ('Uninstalling Whisper from ' + $installed)
     Remove-WhisperRuntime $Target
+    Remove-WhisperInstalledApp
+    Remove-Item -LiteralPath (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Whisper.lnk') -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $installed -Recurse -Force -ErrorAction Stop
     Write-SetupLog 'Whisper uninstall completed.'
 }
@@ -230,42 +252,52 @@ function New-Shortcut([string] $Target, [string] $Link, [string] $WorkingDirecto
     $shortcut = $shell.CreateShortcut($Link)
     $shortcut.TargetPath = $Target
     $shortcut.WorkingDirectory = $WorkingDirectory
-    $shortcut.Description = 'Start local Whisper transcription service'
+    $shortcut.Description = 'Open Whisper service status and controls'
     $shortcut.Save()
 }
 
-function Install-Whisper([scriptblock] $OnProgress, [bool] $AllowLan = $true, [switch] $Repair) {
-    & $OnProgress 5 'Preparing Whisper…'
+function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $AllowLan = $true, [switch] $Repair) {
+    & $OnProgress 5 'Preparing Whisper...'
     if ($Repair) {
-        & $OnProgress 10 'Preparing the previous Whisper installation…'
-        Remove-WhisperRuntime $InstallPath
+        & $OnProgress 10 'Preparing the previous Whisper installation...'
+        Remove-WhisperRuntime $Target
     }
-    Copy-ProgramFiles $InstallPath
-    Write-WhisperInstallMarker $InstallPath
-    & $OnProgress 18 'Installing the stable Python runtime…'
+    Copy-ProgramFiles $Target
+    Write-WhisperInstallMarker $Target
+    & $OnProgress 18 'Installing the stable Python runtime...'
     $python = Install-Python311
-    & $OnProgress 34 'Creating Whisper’s private Python environment…'
-    $venv = Join-Path $InstallPath '.venv'
+    & $OnProgress 34 'Creating Whisper private Python environment...'
+    $venv = Join-Path $Target '.venv'
     if (Test-Path -LiteralPath $venv) { Remove-Item -LiteralPath $venv -Recurse -Force }
-    Invoke-Checked -FilePath $python -Arguments @('-m', 'venv', $venv) -WorkingDirectory $InstallPath
+    Invoke-Checked -FilePath $python -Arguments @('-m', 'venv', $venv) -WorkingDirectory $Target
     $venvPython = Join-Path $venv 'Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
         throw ('Python completed but did not create the expected private environment at: {0}' -f $venvPython)
     }
-    & $OnProgress 48 'Installing Whisper and GPU-compatible libraries…'
-    Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--upgrade', 'pip') -WorkingDirectory $InstallPath
-    Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--no-input', '--disable-pip-version-check', '-r', 'requirements.txt') -WorkingDirectory $InstallPath
-    & $OnProgress 78 'Configuring network access…'
-    if ($AllowLan) { Add-WhisperFirewallRule $InstallPath }
-    & $OnProgress 88 'Registering Whisper to start automatically…'
-    Register-WhisperTask $InstallPath
+    & $OnProgress 48 'Installing Whisper and GPU-compatible libraries. This can take several minutes...'
+    Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--upgrade', 'pip') -WorkingDirectory $Target
+    Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--no-input', '--disable-pip-version-check', '-r', 'requirements.txt') -WorkingDirectory $Target
+    & $OnProgress 78 'Configuring network access...'
+    if ($AllowLan) { Add-WhisperFirewallRule $Target }
+    & $OnProgress 88 'Registering Whisper to start automatically...'
+    Register-WhisperTask $Target
     $desktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
-    New-Shortcut -Target (Join-Path $InstallPath 'StartWhisper.bat') -Link (Join-Path $desktop 'Whisper.lnk') -WorkingDirectory $InstallPath
-    & $OnProgress 100 'Whisper is ready.'
+    Register-WhisperInstalledApp $Target
+    New-Shortcut -Target (Join-Path $env:SystemRoot 'System32\wscript.exe') -Link (Join-Path $desktop 'Whisper.lnk') -WorkingDirectory $InstallPath
+    $shortcut = New-Object -ComObject WScript.Shell
+    $shortcutFile = $shortcut.CreateShortcut((Join-Path $desktop 'Whisper.lnk'))
+    $shortcutFile.Arguments = ('"{0}"' -f (Join-Path $Target 'Whisper-Launcher.vbs'))
+    $shortcutFile.Save()
+    & $OnProgress 100 'Whisper is ready. You can open the Whisper desktop shortcut to see its status.'
+}
+
+if ($Uninstall) {
+    try { Uninstall-Whisper $InstallPath; exit 0 }
+    catch { Write-Error $_; exit 1 }
 }
 
 if ($Silent) {
-    try { Install-Whisper -OnProgress { param($percent, $message) Write-Host ("{0}%  {1}" -f $percent, $message) }; exit 0 }
+    try { Install-Whisper -Target $InstallPath -OnProgress { param($percent, $message) Write-Host ("{0}%  {1}" -f $percent, $message) }; exit 0 }
     catch { Write-Error $_; exit 1 }
 }
 
@@ -477,7 +509,7 @@ $install.Add_Click({
     $install.Enabled=$false; $cancel.Enabled=$false
     try {
         if ($script:ExistingInstall.State -ne 'None' -and $uninstallOption.Checked) {
-            $status.Text = 'Removing Whisper…'
+            $status.Text = 'Removing Whisper...'
             [System.Windows.Forms.Application]::DoEvents()
             Uninstall-Whisper $script:ExistingInstall.Path
             $summary.Text = 'Whisper has been removed from this computer.'
@@ -486,18 +518,18 @@ $install.Add_Click({
             return
         }
         $repair = ($script:ExistingInstall.State -ne 'None' -and $repairOption.Checked)
-        Install-Whisper -Repair:$repair -OnProgress {
+        Install-Whisper -Target $InstallPath -Repair:$repair -OnProgress {
             param($percent,$message)
             # $OnProgress is the callback parameter inside Install-Whisper.
             # This separate name avoids the old self-reference crash here.
             $script:progressBar.SetValue($percent); $status.Text=$message
             [Windows.Forms.Application]::DoEvents()
         }
-        $summary.Text = "Whisper is installed and starting now.`r`n`r`nIn Frivo, open Settings → Providers → Local Whisper and use:`r`nhttp://localhost:9000 (same PC) or this computer's LAN address.`r`n`r`nThe first model download may take a few minutes."
+        $summary.Text = "Whisper is installed and starting now.`r`n`r`nIn Frivo, open Settings > Providers > Local Whisper and use:`r`nhttp://localhost:9000 (same PC) or this computer's LAN address.`r`n`r`nThe first model download may take a few minutes."
         $status.Text='Installation complete.'; $install.Text='Finish'; $script:completed=$true; $install.Enabled=$true
     } catch {
         Write-SetupLog ('FAILED: ' + $_.Exception.Message)
-        $status.Text='Setup failed — see ' + $LogPath
+        $status.Text='Setup failed - see ' + $LogPath
         [Windows.Forms.MessageBox]::Show($_.Exception.Message + "`r`n`r`nDetails: $LogPath", 'Whisper Setup', [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Error) | Out-Null
         $install.Enabled=$true; $cancel.Enabled=$true
     }
