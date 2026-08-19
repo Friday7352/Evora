@@ -95,6 +95,9 @@ function Get-ExistingWhisperInstall([string] $Path) {
     return [pscustomobject]@{ State = 'None'; Path = $Path; Owned = $false }
 }
 
+${script:WhisperSetupPulse} = {}
+function Set-WhisperSetupPulse([scriptblock] $Pulse) { $script:WhisperSetupPulse = if ($Pulse) { $Pulse } else { {} } }
+
 function Invoke-Checked([string] $FilePath, [string[]] $Arguments, [string] $WorkingDirectory) {
     if ([string]::IsNullOrWhiteSpace($FilePath) -or -not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
         throw ('Setup could not find the required program: {0}' -f $FilePath)
@@ -103,16 +106,19 @@ function Invoke-Checked([string] $FilePath, [string[]] $Arguments, [string] $Wor
         throw ('Setup could not find its working folder: {0}' -f $WorkingDirectory)
     }
     Write-SetupLog ('RUN {0} {1}' -f $FilePath, ($Arguments -join ' '))
-    # Invoking the executable directly preserves every argument as a distinct
-    # value. Start-Process joins an argument array into one string, which used
-    # to split C:\Program Files\Whisper\.venv at its space.
-    Push-Location -LiteralPath $WorkingDirectory
-    try {
-        & $FilePath @Arguments
-        $exitCode = $LASTEXITCODE
-    } finally {
-        Pop-Location
+    $quotedArguments = @($Arguments | ForEach-Object { '"' + $_.Replace('"', '\"') + '"' }) -join ' '
+    $info = New-Object System.Diagnostics.ProcessStartInfo
+    $info.FileName = $FilePath
+    $info.Arguments = $quotedArguments
+    $info.WorkingDirectory = $WorkingDirectory
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $process = [System.Diagnostics.Process]::Start($info)
+    while (-not $process.HasExited) {
+        & $script:WhisperSetupPulse
+        Start-Sleep -Milliseconds 300
     }
+    $exitCode = $process.ExitCode
     if ($exitCode -ne 0) { throw ("{0} failed with exit code {1}." -f $FilePath, $exitCode) }
 }
 
@@ -164,7 +170,7 @@ function Copy-ProgramFiles([string] $Destination) {
         '.gitattributes', '.gitignore', 'LICENSE', 'README.md', 'requirements.txt',
         'whisper_server.py', 'StartWhisper.bat', 'install_whisper_task.ps1',
         'uninstall_whisper_task.ps1', 'Install-Whisper.ps1', 'Install-Whisper.cmd', 'Install-Whisper.vbs',
-        'Uninstall-Whisper.vbs', 'Whisper-Launcher.ps1', 'Whisper-Launcher.vbs', 'Evora-Launcher.ps1', 'Whisper.Ui.psm1', 'Evora-Setup.ps1', 'Evora-Setup.vbs', 'Evora.png', 'Evora.ico'
+        'Uninstall-Whisper.vbs', 'Whisper-Launcher.ps1', 'Whisper-Launcher.vbs', 'Evora-Launcher.ps1', 'EvoraHost.exe', 'EvoraSetupHost.exe', 'Whisper.Ui.psm1', 'Evora-Setup.ps1', 'Evora-Setup.vbs', 'Evora.png', 'Evora.ico'
     )
     foreach ($name in $keep) {
         $from = Join-Path $SourceDir $name
@@ -207,7 +213,7 @@ function Register-WhisperInstalledApp([string] $Target) {
     New-Item -Path $key -Force | Out-Null
     New-ItemProperty -Path $key -Name 'DisplayName' -Value 'Evora' -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $key -Name 'DisplayVersion' -Value '1.0' -PropertyType String -Force | Out-Null
-    New-ItemProperty -Path $key -Name 'Publisher' -Value 'Frivo' -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $key -Name 'Publisher' -Value 'Friday' -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $key -Name 'InstallLocation' -Value $Target -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $key -Name 'UninstallString' -Value ('wscript.exe "{0}"' -f $uninstaller) -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $key -Name 'DisplayIcon' -Value ((Join-Path $Target 'Evora.ico') + ',0') -PropertyType String -Force | Out-Null
@@ -242,6 +248,22 @@ function Uninstall-Whisper([string] $Target) {
         throw 'Setup is running from the folder being uninstalled. Run the downloaded installer from a different folder, then try again.'
     }
     Write-SetupLog ('Uninstalling Whisper from ' + $installed)
+    # Close Evora's visible launcher before removing its files. Match the
+    # installed path as well as the launcher name, so unrelated PowerShell
+    # sessions are never touched.
+    Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.CommandLine -and $_.CommandLine -like ('*' + $installed + '*') -and
+            ($_.CommandLine -like '*Evora-Launcher.ps1*' -or $_.CommandLine -like '*Whisper-Launcher.ps1*')
+        } |
+        ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null }
+    Start-Sleep -Milliseconds 400
+    # The branded host waits for the launcher process. End that short-lived
+    # parent too so Windows releases EvoraHost.exe before the folder is
+    # removed.
+    Get-CimInstance Win32_Process -Filter "Name = 'EvoraHost.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -and $_.ExecutablePath.Equals((Join-Path $installed 'EvoraHost.exe'), [StringComparison]::OrdinalIgnoreCase) } |
+        ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null }
     Remove-WhisperRuntime $Target
     Remove-WhisperInstalledApp
     Remove-Item -LiteralPath (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Evora.lnk') -Force -ErrorAction SilentlyContinue
@@ -249,12 +271,13 @@ function Uninstall-Whisper([string] $Target) {
     Write-SetupLog 'Whisper uninstall completed.'
 }
 
-function New-Shortcut([string] $Target, [string] $Link, [string] $WorkingDirectory, [string] $IconPath) {
+function New-Shortcut([string] $Target, [string] $Link, [string] $WorkingDirectory, [string] $IconPath, [string] $Arguments) {
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($Link)
     $shortcut.TargetPath = $Target
     $shortcut.WorkingDirectory = $WorkingDirectory
     $shortcut.Description = 'Open Whisper service status and controls'
+    if ($Arguments) { $shortcut.Arguments = $Arguments }
     if ($IconPath -and (Test-Path -LiteralPath $IconPath -PathType Leaf)) { $shortcut.IconLocation = ('{0},0' -f $IconPath) }
     $shortcut.Save()
 }
@@ -287,11 +310,7 @@ function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $Al
     $desktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
     Register-WhisperInstalledApp $Target
     if ($CreateDesktopShortcut) {
-        New-Shortcut -Target (Join-Path $env:SystemRoot 'System32\wscript.exe') -Link (Join-Path $desktop 'Evora.lnk') -WorkingDirectory $Target -IconPath (Join-Path $Target 'Evora.ico')
-        $shortcut = New-Object -ComObject WScript.Shell
-        $shortcutFile = $shortcut.CreateShortcut((Join-Path $desktop 'Evora.lnk'))
-        $shortcutFile.Arguments = ('"{0}"' -f (Join-Path $Target 'Whisper-Launcher.vbs'))
-        $shortcutFile.Save()
+        New-Shortcut -Target (Join-Path $Target 'EvoraHost.exe') -Link (Join-Path $desktop 'Evora.lnk') -WorkingDirectory $Target -IconPath (Join-Path $Target 'Evora.ico') -Arguments ('--script "{0}"' -f (Join-Path $Target 'Evora-Launcher.ps1'))
     }
     & $OnProgress 100 'Evora is ready.'
 }

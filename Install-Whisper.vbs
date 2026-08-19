@@ -1,12 +1,10 @@
 Option Explicit
 
-' Legacy entry point for Evora Setup. PowerShell handles the
-' UAC prompt and opens the actual installer window; WScript keeps a console
-' window from appearing behind it.
-Dim shell, fileSystem, folder, setupScript, arguments
+' Legacy entry point for Evora Setup. Delegate to the Evora-named entry
+' point so every supported shortcut uses the branded Windows setup host.
+Dim shell, fileSystem, folder, setupScript
 Set shell = CreateObject("WScript.Shell")
 Set fileSystem = CreateObject("Scripting.FileSystemObject")
 folder = fileSystem.GetParentFolderName(WScript.ScriptFullName)
-setupScript = folder & "\Evora-Setup.ps1"
-arguments = "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File """ & setupScript & """"
-shell.Run "powershell.exe " & arguments, 0, False
+setupScript = folder & "\Evora-Setup.vbs"
+shell.Run "wscript.exe """ & setupScript & """", 0, False
