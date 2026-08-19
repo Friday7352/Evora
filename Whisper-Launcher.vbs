@@ -7,7 +7,7 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 folder = fso.GetParentFolderName(WScript.ScriptFullName)
 host = folder & "\EvoraHost.exe"
 If fso.FileExists(host) Then
-    shell.Run """" & host & """ --script """" & folder & "\Evora-Launcher.ps1"""", 0, False
+    shell.Run Chr(34) & host & Chr(34) & " --script " & Chr(34) & folder & "\Evora-Launcher.ps1" & Chr(34), 0, False
 Else
     args = "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File """ & folder & "\Evora-Launcher.ps1"""
     shell.Run "powershell.exe " & args, 0, False

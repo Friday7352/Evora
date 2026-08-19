@@ -10,7 +10,7 @@ folder = fileSystem.GetParentFolderName(WScript.ScriptFullName)
 setupScript = folder & "\Evora-Setup.ps1"
 host = folder & "\EvoraSetupHost.exe"
 If fileSystem.FileExists(host) Then
-    shell.Run """" & host & """ --script """" & setupScript & """", 0, False
+    shell.Run Chr(34) & host & Chr(34) & " --script " & Chr(34) & setupScript & Chr(34), 0, False
 Else
     arguments = "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File """ & setupScript & """"
     shell.Run "powershell.exe " & arguments, 0, False
