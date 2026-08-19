@@ -71,7 +71,7 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 Import-Module (Join-Path $Root 'Whisper.Ui.psm1') -Force
 $Theme = Get-FrivoTheme
-$IconPath = Join-Path $Root 'Evora.ico'
+$IconPath = Join-Path $Root 'EvoraIcon.ico'
 $form = New-FrivoForm -Theme $Theme -Title 'Evora' -Width 470 -Height 570 -IconPath $IconPath
 $header = New-FrivoHeader -Theme $Theme -Form $form -Title 'Evora' -Subtitle 'Local transcription service for Frivo' -LogoPngPath (Join-Path $Root 'Evora.png')
 
@@ -158,7 +158,10 @@ function Test-EvoraStartupEnabled {
 }
 
 function Test-EvoraNetworkEnabled {
-    return (Get-EvoraFirewallRules).Count -gt 0
+    # Frivo treats its named private-network rule as the switch for showing
+    # the LAN card.  Mirror that behavior here so an already-open port is
+    # immediately visible in the main launcher.
+    return $null -ne (Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue | Select-Object -First 1)
 }
 
 function Test-EvoraServerUp {

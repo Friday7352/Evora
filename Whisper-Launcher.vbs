@@ -5,7 +5,7 @@ Dim shell, fso, folder, host, args
 Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 folder = fso.GetParentFolderName(WScript.ScriptFullName)
-host = folder & "\EvoraHost.exe"
+host = folder & "\Evora.exe"
 If fso.FileExists(host) Then
     shell.Run Chr(34) & host & Chr(34) & " --script " & Chr(34) & folder & "\Evora-Launcher.ps1" & Chr(34), 0, False
 Else

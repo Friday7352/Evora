@@ -170,7 +170,7 @@ function Copy-ProgramFiles([string] $Destination) {
         '.gitattributes', '.gitignore', 'LICENSE', 'README.md', 'THIRD_PARTY_NOTICES.txt', 'requirements.txt',
         'whisper_server.py', 'StartWhisper.bat', 'install_whisper_task.ps1',
         'uninstall_whisper_task.ps1', 'Install-Whisper.ps1', 'Install-Whisper.cmd', 'Install-Whisper.vbs',
-        'Uninstall-Whisper.vbs', 'Whisper-Launcher.ps1', 'Whisper-Launcher.vbs', 'Evora-Launcher.ps1', 'EvoraHost.exe', 'EvoraSetupHost.exe', 'Whisper.Ui.psm1', 'Evora-Setup.ps1', 'Evora-Setup.vbs', 'Evora.png', 'Evora.ico'
+        'Uninstall-Whisper.vbs', 'Whisper-Launcher.ps1', 'Whisper-Launcher.vbs', 'Evora-Launcher.ps1', 'Evora.exe', 'EvoraSetup.exe', 'Whisper.Ui.psm1', 'Evora-Setup.ps1', 'Evora-Setup.vbs', 'Evora.png', 'EvoraIcon.ico'
     )
     foreach ($name in $keep) {
         $from = Join-Path $SourceDir $name
@@ -248,7 +248,7 @@ function Register-WhisperInstalledApp([string] $Target) {
     New-ItemProperty -Path $key -Name 'Publisher' -Value 'Friday' -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $key -Name 'InstallLocation' -Value $Target -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $key -Name 'UninstallString' -Value ('wscript.exe "{0}"' -f $uninstaller) -PropertyType String -Force | Out-Null
-    New-ItemProperty -Path $key -Name 'DisplayIcon' -Value ((Join-Path $Target 'Evora.ico') + ',0') -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $key -Name 'DisplayIcon' -Value ((Join-Path $Target 'EvoraIcon.ico') + ',0') -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $key -Name 'NoModify' -Value 1 -PropertyType DWord -Force | Out-Null
 }
 
@@ -289,11 +289,14 @@ function Uninstall-Whisper([string] $Target) {
         } |
         ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null }
     Start-Sleep -Milliseconds 800
-    # The branded host waits for the launcher process. End that short-lived
-    # parent too so Windows releases EvoraHost.exe before the folder is
-    # removed.
-    Get-CimInstance Win32_Process -Filter "Name = 'EvoraHost.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.ExecutablePath -and $_.ExecutablePath.Equals((Join-Path $installed 'EvoraHost.exe'), [StringComparison]::OrdinalIgnoreCase) } |
+    # End the branded host too, including the original host name used by the
+    # first release, so Windows releases every Evora file before removal.
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -in @('Evora.exe', 'EvoraHost.exe') -and $_.ExecutablePath -and
+            ($_.ExecutablePath.Equals((Join-Path $installed 'Evora.exe'), [StringComparison]::OrdinalIgnoreCase) -or
+             $_.ExecutablePath.Equals((Join-Path $installed 'EvoraHost.exe'), [StringComparison]::OrdinalIgnoreCase))
+        } |
         ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null }
     Start-Sleep -Milliseconds 400
     Remove-WhisperRuntime $Target
@@ -345,7 +348,7 @@ function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $Al
     $desktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
     Register-WhisperInstalledApp $Target
     if ($CreateDesktopShortcut) {
-        New-Shortcut -Target (Join-Path $Target 'EvoraHost.exe') -Link (Join-Path $desktop 'Evora.lnk') -WorkingDirectory $Target -IconPath (Join-Path $Target 'Evora.ico') -Arguments ('--script "{0}"' -f (Join-Path $Target 'Evora-Launcher.ps1'))
+        New-Shortcut -Target (Join-Path $Target 'Evora.exe') -Link (Join-Path $desktop 'Evora.lnk') -WorkingDirectory $Target -IconPath (Join-Path $Target 'EvoraIcon.ico') -Arguments ('--script "{0}"' -f (Join-Path $Target 'Evora-Launcher.ps1'))
     }
     & $OnProgress 100 'Evora is ready.'
 }

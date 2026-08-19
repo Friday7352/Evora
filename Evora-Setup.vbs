@@ -8,7 +8,7 @@ Set shell = CreateObject("WScript.Shell")
 Set fileSystem = CreateObject("Scripting.FileSystemObject")
 folder = fileSystem.GetParentFolderName(WScript.ScriptFullName)
 setupScript = folder & "\Evora-Setup.ps1"
-host = folder & "\EvoraSetupHost.exe"
+host = folder & "\EvoraSetup.exe"
 If fileSystem.FileExists(host) Then
     shell.Run Chr(34) & host & Chr(34) & " --script " & Chr(34) & setupScript & Chr(34), 0, False
 Else
