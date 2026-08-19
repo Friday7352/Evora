@@ -182,10 +182,22 @@ function Copy-ProgramFiles([string] $Destination) {
 
 function Add-WhisperFirewallRule([string] $Target) {
     $python = Join-Path $Target '.venv\Scripts\python.exe'
-    Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue |
-        Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    Remove-WhisperFirewallRule $Target
     New-NetFirewallRule -DisplayName 'Whisper transcription service' -Direction Inbound -Action Allow `
         -Protocol TCP -LocalPort 9000 -Program $python -Profile Private -RemoteAddress LocalSubnet | Out-Null
+}
+
+function Remove-WhisperFirewallRule([string] $Target) {
+    # Remove only Evora's own private-network rule.  This avoids touching a
+    # similarly named rule that a user or another application may have made.
+    $python = Join-Path $Target '.venv\Scripts\python.exe'
+    Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue | ForEach-Object {
+        $rule = $_
+        $application = Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $rule -ErrorAction SilentlyContinue
+        if ($application -and $application.Program -and $application.Program.Equals($python, [StringComparison]::OrdinalIgnoreCase)) {
+            $rule | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Get-EvoraHostsPath {
@@ -249,8 +261,7 @@ function Remove-WhisperRuntime([string] $Target) {
     # Python environment and machine-wide service registration are rebuilt.
     Stop-ScheduledTask -TaskName 'WhisperTranscriptionService' -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName 'WhisperTranscriptionService' -Confirm:$false -ErrorAction SilentlyContinue
-    Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue |
-        Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    Remove-WhisperFirewallRule $Target
     $venv = Join-Path $Target '.venv'
     if (Test-Path -LiteralPath $venv -PathType Container) {
         Remove-Item -LiteralPath $venv -Recurse -Force -ErrorAction Stop
@@ -277,13 +288,14 @@ function Uninstall-Whisper([string] $Target) {
             ($_.CommandLine -like '*Evora-Launcher.ps1*' -or $_.CommandLine -like '*Whisper-Launcher.ps1*')
         } |
         ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null }
-    Start-Sleep -Milliseconds 400
+    Start-Sleep -Milliseconds 800
     # The branded host waits for the launcher process. End that short-lived
     # parent too so Windows releases EvoraHost.exe before the folder is
     # removed.
     Get-CimInstance Win32_Process -Filter "Name = 'EvoraHost.exe'" -ErrorAction SilentlyContinue |
         Where-Object { $_.ExecutablePath -and $_.ExecutablePath.Equals((Join-Path $installed 'EvoraHost.exe'), [StringComparison]::OrdinalIgnoreCase) } |
         ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null }
+    Start-Sleep -Milliseconds 400
     Remove-WhisperRuntime $Target
     Remove-EvoraHostsEntry
     Remove-WhisperInstalledApp

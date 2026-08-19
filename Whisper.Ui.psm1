@@ -172,8 +172,7 @@ function New-FrivoForm {
         [Parameter(Mandatory)] $Theme,
         [string] $Title,
         [int] $Width, [int] $Height,
-        [string] $IconPath,
-        [string] $AppId = 'Evora.Desktop'
+        [string] $IconPath
     )
     $f = New-Object System.Windows.Forms.Form
     $f.Text            = $Title
@@ -207,7 +206,10 @@ function New-FrivoForm {
     $f.Add_Shown($bringForwardOnce)
     if ($IconPath -and (Test-Path -LiteralPath $IconPath)) {
         try { $f.Icon = New-Object System.Drawing.Icon($IconPath) } catch { }
-        Set-FrivoTaskbarIcon -Form $f -IconPath $IconPath -AppId $AppId
+        # Use one stable identity for the setup and launcher, just as Frivo
+        # does.  Windows then uses the icon from the real Evora shortcut
+        # instead of creating a separate, generic PowerShell taskbar group.
+        Set-FrivoTaskbarIcon -Form $f -IconPath $IconPath -AppId 'Evora.Setup'
     }
     return $f
 }

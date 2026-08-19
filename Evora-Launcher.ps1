@@ -28,6 +28,18 @@ function Get-EvoraRequestedAction {
     return $null
 }
 
+function Get-EvoraFirewallRules {
+    $python = Join-Path $Root '.venv\Scripts\python.exe'
+    return @(Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue | Where-Object {
+        $application = Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $_ -ErrorAction SilentlyContinue
+        $application -and $application.Program -and $application.Program.Equals($python, [StringComparison]::OrdinalIgnoreCase)
+    })
+}
+
+function Remove-EvoraFirewallRule {
+    Get-EvoraFirewallRules | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+}
+
 $requestedAction = Get-EvoraRequestedAction
 if ($requestedAction) {
     if (-not (Test-EvoraAdmin)) {
@@ -46,10 +58,10 @@ if ($requestedAction) {
         'EnableLan' {
             $python = Join-Path $Root '.venv\Scripts\python.exe'
             if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw 'Evora is not fully installed yet.' }
-            Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+            Remove-EvoraFirewallRule
             New-NetFirewallRule -DisplayName 'Whisper transcription service' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 9000 -Program $python -Profile Private -RemoteAddress LocalSubnet | Out-Null
         }
-        'DisableLan' { Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue }
+        'DisableLan' { Remove-EvoraFirewallRule }
     }
     exit 0
 }
@@ -60,7 +72,7 @@ Add-Type -AssemblyName System.Drawing
 Import-Module (Join-Path $Root 'Whisper.Ui.psm1') -Force
 $Theme = Get-FrivoTheme
 $IconPath = Join-Path $Root 'Evora.ico'
-$form = New-FrivoForm -Theme $Theme -Title 'Evora' -Width 470 -Height 570 -IconPath $IconPath -AppId 'Evora.Launcher'
+$form = New-FrivoForm -Theme $Theme -Title 'Evora' -Width 470 -Height 570 -IconPath $IconPath
 $header = New-FrivoHeader -Theme $Theme -Form $form -Title 'Evora' -Subtitle 'Local transcription service for Frivo' -LogoPngPath (Join-Path $Root 'Evora.png')
 
 $viewMain = New-Object System.Windows.Forms.Panel
@@ -146,7 +158,23 @@ function Test-EvoraStartupEnabled {
 }
 
 function Test-EvoraNetworkEnabled {
-    return $null -ne (Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue | Select-Object -First 1)
+    return (Get-EvoraFirewallRules).Count -gt 0
+}
+
+function Test-EvoraServerUp {
+    # This is the same lightweight TCP probe Frivo uses.  It keeps the
+    # window responsive instead of waiting for an HTTP request every timer tick.
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $async = $client.BeginConnect('127.0.0.1', 9000, $null, $null)
+        if (-not $async.AsyncWaitHandle.WaitOne(400)) { return $false }
+        $client.EndConnect($async)
+        return $true
+    } catch {
+        return $false
+    } finally {
+        $client.Close()
+    }
 }
 
 function Get-EvoraLanIp {
@@ -162,6 +190,8 @@ function Test-EvoraLocalName {
 
 $script:cachedModelText = 'Checking model cache...'
 $script:nextModelCacheScan = [DateTime]::MinValue
+$script:health = $null
+$script:nextHealthCheck = [DateTime]::MinValue
 $script:loadingSettings = $false
 
 function Set-EvoraMainNetworkState([bool] $ShowLan) {
@@ -192,10 +222,15 @@ function Set-EvoraSettingsNetworkState([bool] $PortOpen) {
 function Update-EvoraStatus {
     $taskState = 'Not registered'
     try { $taskState = (Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop).State.ToString() } catch { }
-    $health = $null
-    if ($taskState -eq 'Running') {
-        try { $health = Invoke-RestMethod -Uri 'http://127.0.0.1:9000/health' -TimeoutSec 1 -ErrorAction Stop } catch { }
+    $serverUp = ($taskState -eq 'Running') -and (Test-EvoraServerUp)
+    if ($serverUp -and [DateTime]::Now -ge $script:nextHealthCheck) {
+        # Model information changes only during startup or a model change, so
+        # refresh it occasionally rather than blocking every five seconds.
+        try { $script:health = Invoke-RestMethod -Uri 'http://127.0.0.1:9000/health' -TimeoutSec 1 -ErrorAction Stop } catch { }
+        $script:nextHealthCheck = [DateTime]::Now.AddSeconds(30)
     }
+    if (-not $serverUp) { $script:health = $null; $script:nextHealthCheck = [DateTime]::MinValue }
+    $health = $script:health
     if ([DateTime]::Now -ge $script:nextModelCacheScan) {
         $cached = @(Get-CachedModelNames)
         $script:cachedModelText = if ($cached.Count) { (($cached | ForEach-Object { ConvertTo-EvoraTitle $_ }) -join ', ') } else { 'No downloaded speech models found yet.' }
@@ -210,16 +245,17 @@ function Update-EvoraStatus {
     if ($showLan) { $lanUrl.Text = ('http://{0}:9000' -f $lanAddress) }
     Set-EvoraMainNetworkState $showLan
     Set-EvoraSettingsNetworkState $portOpen
-    if ($health -and $health.ok) {
-        $modelName = ConvertTo-EvoraTitle $health.model
-        $processing = if ($health.device -eq 'cuda') { 'GPU (CUDA)' } elseif ($health.device -eq 'cpu') { 'CPU' } else { ConvertTo-EvoraTitle $health.device }
-        $dot.BackColor = $Theme.Signal
-        $status.Text = 'Running'
+    if ($serverUp) {
+        $reportedHealth = $health -and $health.ok
+        $modelName = if ($reportedHealth) { ConvertTo-EvoraTitle $health.model } else { 'Starting...' }
+        $processing = if ($reportedHealth -and $health.device -eq 'cuda') { 'GPU (CUDA)' } elseif ($reportedHealth -and $health.device -eq 'cpu') { 'CPU' } elseif ($reportedHealth) { ConvertTo-EvoraTitle $health.device } else { 'Checking...' }
+        $dot.BackColor = if ($reportedHealth) { $Theme.Signal } else { $Theme.Warn }
+        $status.Text = if ($reportedHealth) { 'Running' } else { 'Starting...' }
         $modelSummary.Text = $modelName
         $deviceSummary.Text = $processing
         $activeModel.Text = $modelName
         $activeDevice.Text = $processing
-        $note.Text = if ($showLan) { 'evora.local works on this PC. Other devices use the address above.' } else { 'Frivo can connect at ' + $localAddress + '.' }
+        $note.Text = if ($showLan) { 'evora.local works on this PC. Other devices use the address above.' } elseif ($reportedHealth) { 'Frivo can connect at ' + $localAddress + '.' } else { 'The first model download can take several minutes.' }
         $btnOpen.Text = 'Open service status'; $btnOpen.Enabled = $true
         $btnPower.Text = 'Stop Evora'; $btnPower.Enabled = $true
     } else {

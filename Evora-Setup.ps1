@@ -16,7 +16,7 @@ if($existing.State -eq 'None'){
   $legacy=Get-ExistingWhisperInstall $legacyPath
   if($legacy.State -ne 'None'){$InstallPath=$legacy.Path;$existing=$legacy}
 }
-$form=New-FrivoForm -Theme $Theme -Title 'Evora Setup' -Width 620 -Height 500 -IconPath (Join-Path $root 'Evora.ico') -AppId 'Evora.Setup'
+$form=New-FrivoForm -Theme $Theme -Title 'Evora Setup' -Width 620 -Height 500 -IconPath (Join-Path $root 'Evora.ico')
 $header=New-FrivoHeader -Theme $Theme -Form $form -Title 'Welcome to Evora Setup' -Subtitle 'Private, local transcription for Frivo' -LogoPngPath (Join-Path $root 'Evora.png')
 $body=New-Object System.Windows.Forms.Panel;$body.Location=[Drawing.Point]::new(0,76);$body.Size=[Drawing.Size]::new(620,362);$body.BackColor=$Theme.Bg;$form.Controls.Add($body)
 $footer=New-Object System.Windows.Forms.Panel;$footer.Location=[Drawing.Point]::new(0,438);$footer.Size=[Drawing.Size]::new(620,62);$footer.BackColor=$Theme.Bg;$form.Controls.Add($footer)
