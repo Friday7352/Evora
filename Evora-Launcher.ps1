@@ -60,17 +60,17 @@ Add-Type -AssemblyName System.Drawing
 Import-Module (Join-Path $Root 'Whisper.Ui.psm1') -Force
 $Theme = Get-FrivoTheme
 $IconPath = Join-Path $Root 'Evora.ico'
-$form = New-FrivoForm -Theme $Theme -Title 'Evora' -Width 470 -Height 540 -IconPath $IconPath -AppId 'Evora.Launcher'
+$form = New-FrivoForm -Theme $Theme -Title 'Evora' -Width 470 -Height 570 -IconPath $IconPath -AppId 'Evora.Launcher'
 $header = New-FrivoHeader -Theme $Theme -Form $form -Title 'Evora' -Subtitle 'Local transcription service for Frivo' -LogoPngPath (Join-Path $Root 'Evora.png')
 
 $viewMain = New-Object System.Windows.Forms.Panel
 $viewMain.Location = [System.Drawing.Point]::new(0, 84)
-$viewMain.Size = [System.Drawing.Size]::new(470, 456)
+$viewMain.Size = [System.Drawing.Size]::new(470, 486)
 $viewMain.BackColor = $Theme.Bg
 $form.Controls.Add($viewMain)
 $viewSettings = New-Object System.Windows.Forms.Panel
 $viewSettings.Location = [System.Drawing.Point]::new(0, 84)
-$viewSettings.Size = [System.Drawing.Size]::new(470, 456)
+$viewSettings.Size = [System.Drawing.Size]::new(470, 486)
 $viewSettings.BackColor = $Theme.Bg
 $viewSettings.Visible = $false
 $form.Controls.Add($viewSettings)
@@ -117,8 +117,8 @@ $activeDevice = New-FrivoLabel -Theme $Theme -Parent $activeDeviceCard -Text 'Wa
 [void](New-FrivoLabel -Theme $Theme -Parent $viewSettings -Text 'DOWNLOADED MODELS' -X 30 -Y 342 -W 380 -H 16 -Font $Theme.FontCaps -Color $Theme.Faint)
 $cachedCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 24 -Y 364 -W 422 -H 54
 $cachedModels = New-FrivoLabel -Theme $Theme -Parent $cachedCard -Text 'Checking model cache...' -X 18 -Y 16 -W 386 -H 22 -Font $Theme.FontSmall -Color $Theme.Dim
-$btnLog = New-FrivoButton -Theme $Theme -Parent $viewSettings -Text 'View service log' -X 24 -Y 428 -W 205 -H 32
-$btnFolder = New-FrivoButton -Theme $Theme -Parent $viewSettings -Text 'Open Evora folder' -X 241 -Y 428 -W 205 -H 32
+$btnLog = New-FrivoButton -Theme $Theme -Parent $viewSettings -Text 'View service log' -X 24 -Y 434 -W 205 -H 36
+$btnFolder = New-FrivoButton -Theme $Theme -Parent $viewSettings -Text 'Open Evora folder' -X 241 -Y 434 -W 205 -H 36
 
 function Get-CachedModelNames {
     $cache = Join-Path $Root 'model_cache'
@@ -194,7 +194,6 @@ $btnOpen.Add_Click({
 })
 $btnPower.Add_Click({ Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-Stop'); Update-EvoraStatus })
 $btnSettings.Add_Click({
-    Update-EvoraStatus
     $script:loadingSettings = $true
     $startupCheck.Checked = Test-EvoraStartupEnabled
     $networkCheck.Checked = Test-EvoraNetworkEnabled
