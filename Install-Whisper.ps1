@@ -41,6 +41,7 @@ $SourceDir = Split-Path -Parent $PSCommandPath
 $LogPath = Join-Path ([IO.Path]::GetTempPath()) 'Whisper-Setup.log'
 $script:InstallMarkerName = '.whisper-install.json'
 $script:InstallMarkerId = 'com.frivo.whisper'
+$script:RequiredPythonRuntime = '3.11.9'
 
 function Write-SetupLog([string] $Message) {
     $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -63,11 +64,31 @@ function Test-WhisperInstallOwnership([string] $Path) {
     } catch { return $false }
 }
 
+function Get-EvoraEnvironmentSignature {
+    $requirements = Join-Path $SourceDir 'requirements.txt'
+    if (-not (Test-Path -LiteralPath $requirements -PathType Leaf)) {
+        throw 'Setup could not find requirements.txt.'
+    }
+    $requirementsHash = (Get-FileHash -LiteralPath $requirements -Algorithm SHA256).Hash.ToLowerInvariant()
+    return ('python-{0};requirements-sha256-{1}' -f $script:RequiredPythonRuntime, $requirementsHash)
+}
+
+function Test-EvoraEnvironmentCompatible([string] $Path) {
+    try {
+        if (-not (Test-Path -LiteralPath (Join-Path $Path '.venv\Scripts\python.exe') -PathType Leaf)) { return $false }
+        $markerPath = Get-WhisperInstallMarkerPath $Path
+        $marker = Get-Content -LiteralPath $markerPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        return -not [string]::IsNullOrWhiteSpace([string] $marker.EnvironmentSignature) -and
+            ([string] $marker.EnvironmentSignature -eq (Get-EvoraEnvironmentSignature))
+    } catch { return $false }
+}
+
 function Write-WhisperInstallMarker([string] $Path) {
     $marker = [ordered]@{
         Id = $script:InstallMarkerId
         InstallPath = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
         CreatedUtc = [DateTime]::UtcNow.ToString('o')
+        EnvironmentSignature = Get-EvoraEnvironmentSignature
     }
     [IO.File]::WriteAllText((Get-WhisperInstallMarkerPath $Path), ($marker | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
 }
@@ -148,9 +169,9 @@ function Install-Python311 {
     $python = Find-Python311
     if ($python) { return $python }
 
-    $installer = Join-Path ([IO.Path]::GetTempPath()) 'python-3.11.9-amd64.exe'
-    Write-SetupLog 'Downloading Python 3.11.9 from python.org.'
-    Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' `
+    $installer = Join-Path ([IO.Path]::GetTempPath()) ('python-{0}-amd64.exe' -f $script:RequiredPythonRuntime)
+    Write-SetupLog ('Downloading Python {0} from python.org.' -f $script:RequiredPythonRuntime)
+    Invoke-WebRequest -Uri ('https://www.python.org/ftp/python/{0}/python-{0}-amd64.exe' -f $script:RequiredPythonRuntime) `
         -OutFile $installer -UseBasicParsing
     try {
         Invoke-Checked -FilePath $installer -Arguments @(
@@ -352,7 +373,6 @@ function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $Al
         Remove-WhisperRuntime $Target
     }
     Copy-ProgramFiles $Target
-    Write-WhisperInstallMarker $Target
     # Update preserves an existing private environment.  Repair deliberately
     # creates a fresh one, so it never restores cached GPU libraries.
     $reused = Restore-EvoraReinstallCache $Target -SkipPythonEnvironment:$Repair
@@ -379,6 +399,8 @@ function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $Al
         Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--upgrade', 'pip') -WorkingDirectory $Target
         Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--no-input', '--disable-pip-version-check', '-r', 'requirements.txt') -WorkingDirectory $Target
     }
+    # Record the environment only after it is known to match this release.
+    Write-WhisperInstallMarker $Target
     & $OnProgress 78 'Configuring network access...'
     if ($AllowLan) { Add-WhisperFirewallRule $Target }
     & $OnProgress 88 'Finishing Evora setup...'
