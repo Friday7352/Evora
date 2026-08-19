@@ -229,10 +229,11 @@ $confirm = New-Object System.Windows.Forms.Panel
 $confirm.Location = [Drawing.Point]::new(0, 76); $confirm.Size = [Drawing.Size]::new(500, 354); $confirm.BackColor = $Theme.Bg
 $form.Controls.Add($confirm)
 [void](New-FrivoLabel -Theme $Theme -Parent $confirm -Text 'This removes Evora, its background service, private-network access, and shortcuts.' -X 28 -Y 10 -W 444 -H 48 -Font $Theme.FontUI -Color $Theme.Dim)
-$removeCard = New-FrivoCard -Theme $Theme -Parent $confirm -X 24 -Y 72 -W 452 -H 94
+$removeCard = New-FrivoCard -Theme $Theme -Parent $confirm -X 24 -Y 72 -W 452 -H 112
 [void](New-FrivoLabel -Theme $Theme -Parent $removeCard -Text 'Evora will be removed from this computer.' -X 18 -Y 16 -W 416 -H 20 -Font $Theme.FontMid -Color $Theme.Ink)
 [void](New-FrivoLabel -Theme $Theme -Parent $removeCard -Text 'This does not change Frivo or your Windows Python installation.' -X 18 -Y 38 -W 416 -H 18 -Font $Theme.FontSmall -Color $Theme.Dim)
-$keepCache = New-FrivoCheck -Theme $Theme -Parent $removeCard -Text 'Keep downloaded models and GPU libraries for a faster reinstall' -X 18 -Y 62 -W 416 -Checked $true
+$keepCache = New-FrivoCheck -Theme $Theme -Parent $removeCard -Text 'Keep GPU libraries and models' -X 18 -Y 62 -W 416 -Checked $true
+[void](New-FrivoLabel -Theme $Theme -Parent $removeCard -Text 'They will be reused automatically on the next Evora install.' -X 38 -Y 84 -W 390 -H 16 -Font $Theme.FontSmall -Color $Theme.Dim)
 $removeButton = New-FrivoButton -Theme $Theme -Parent $confirm -Text 'Uninstall Evora' -X 24 -Y 250 -W 452 -H 44 -Primary $true
 $cancelButton = New-FrivoButton -Theme $Theme -Parent $confirm -Text 'Cancel' -X 24 -Y 302 -W 452 -H 38
 

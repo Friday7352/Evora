@@ -330,7 +330,20 @@ $btnFolder.Add_Click({ Start-Process explorer.exe -ArgumentList ('"{0}"' -f $Roo
 # or stops it explicitly.
 $notify = New-Object System.Windows.Forms.NotifyIcon
 $notify.Text = 'Evora'
-if (Test-Path -LiteralPath $IconPath) { try { $notify.Icon = New-Object System.Drawing.Icon($IconPath) } catch { } }
+$script:trayIcon = $null
+# Use the executable's embedded icon for the notification area.  It is the
+# same icon Windows uses for Evora in Task Manager and survives after the
+# form is hidden; loading a transient .ico directly can disappear on some
+# Windows builds.
+try {
+    $nativeLauncher = Join-Path $Root 'EvoraHost.exe'
+    $script:trayIcon = if (Test-Path -LiteralPath $nativeLauncher) {
+        [System.Drawing.Icon]::ExtractAssociatedIcon($nativeLauncher)
+    } else {
+        New-Object System.Drawing.Icon($IconPath)
+    }
+    $notify.Icon = $script:trayIcon
+} catch { }
 $trayMenu = New-Object System.Windows.Forms.ContextMenuStrip
 $trayShow = $trayMenu.Items.Add('Show Evora')
 [void] $trayMenu.Items.Add('-')
@@ -376,6 +389,9 @@ $form.Add_FormClosing({
         Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-Stop')
     }
 })
-$form.Add_FormClosed({ $timer.Stop(); $timer.Dispose(); $notify.Visible = $false; $notify.Dispose() })
+$form.Add_FormClosed({
+    $timer.Stop(); $timer.Dispose(); $notify.Visible = $false; $notify.Dispose()
+    if ($script:trayIcon) { $script:trayIcon.Dispose() }
+})
 Update-EvoraStatus
 [void]$form.ShowDialog()
