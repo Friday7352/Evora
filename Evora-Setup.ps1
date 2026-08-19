@@ -3,7 +3,7 @@ param([string]$InstallPath=(Join-Path $env:ProgramFiles 'Evora'))
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSCommandPath
 $isAdmin=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if(-not $isAdmin){Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-STA','-WindowStyle','Hidden','-File',('"{0}"' -f $PSCommandPath),'-InstallPath',('"{0}"' -f $InstallPath));exit}
+if(-not $isAdmin){$host=Join-Path $root 'EvoraSetupHost.exe';if(Test-Path -LiteralPath $host){Start-Process -FilePath $host -Verb RunAs -WindowStyle Hidden -ArgumentList @('--script',('"{0}"' -f $PSCommandPath));exit};Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-STA','-WindowStyle','Hidden','-File',('"{0}"' -f $PSCommandPath),'-InstallPath',('"{0}"' -f $InstallPath));exit}
 . (Join-Path $root 'Install-Whisper.ps1') -NoUi -InstallPath $InstallPath
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
