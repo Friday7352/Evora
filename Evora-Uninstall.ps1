@@ -34,6 +34,24 @@ function Add-Step([string] $Text, [bool] $Ok = $true) {
     if ($script:StepSink) { & $script:StepSink $Text $Ok }
 }
 
+function ConvertTo-EvoraArgumentString {
+    # Start-Process does not reliably preserve a command that contains spaces
+    # when its argument list is supplied as an array.  Use Frivo's quoting
+    # approach for the deferred self-cleanup command.
+    param([string[]] $Arguments)
+    if ($null -eq $Arguments -or $Arguments.Count -eq 0) { return '' }
+    $parts = foreach ($argument in $Arguments) {
+        $text = [string] $argument
+        if ($text -eq '') { '""' }
+        elseif ($text -match '[\s"]') {
+            $escaped = [regex]::Replace($text, '(\\*)"', '$1$1\"')
+            $escaped = [regex]::Replace($escaped, '(\\+)$', '$1$1')
+            '"' + $escaped + '"'
+        } else { $text }
+    }
+    return ($parts -join ' ')
+}
+
 function Test-EvoraAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     return (New-Object Security.Principal.WindowsPrincipal($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -136,6 +154,7 @@ function Invoke-EvoraRemoval {
         $ownedTask = $task -and (($task.Actions | Out-String) -match [regex]::Escape($Root))
         if ($ownedTask) {
             Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 1000
             Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
             Add-Step 'Stopped and removed the Evora background service'
         }
@@ -195,7 +214,8 @@ function Invoke-EvoraRemoval {
     try {
         $escapedRoot = $Root.Replace("'", "''")
         $cleanup = "Wait-Process -Id $PID; Remove-Item -LiteralPath '$escapedRoot' -Recurse -Force -ErrorAction SilentlyContinue"
-        Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -WorkingDirectory ([Environment]::GetFolderPath('Windows')) -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-Command', $cleanup) | Out-Null
+        $cleanupArguments = ConvertTo-EvoraArgumentString @('-NoProfile', '-WindowStyle', 'Hidden', '-Command', $cleanup)
+        Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -WorkingDirectory ([Environment]::GetFolderPath('Windows')) -ArgumentList $cleanupArguments | Out-Null
         Add-Step 'Finalizing Evora program files and downloaded models'
     } catch { Add-Step 'Finalize Evora program files' $false }
 }
@@ -256,11 +276,9 @@ $removeButton.Add_Click({
         [System.Windows.Forms.Application]::DoEvents()
     }
     Invoke-EvoraRemoval -KeepDownloaded $keepCache.Checked
-    if ($runLog.TextLength -eq 0) {
-        # If Windows delayed a live UI repaint, still show the completed
-        # removal record before the summary rather than an empty panel.
-        foreach ($step in $script:Steps) { $runLog.AppendText((if ($step.Ok) { '  ' } else { '! ' }) + $step.Text + "`r`n") }
-    }
+    # Repaint from the recorded result once removal ends. This prevents a
+    # native-host timing quirk from leaving the progress card blank.
+    $runLog.Text = (($script:Steps | ForEach-Object { (if ($_.Ok) { '  ' } else { '! ' }) + $_.Text }) -join "`r`n")
     if ($script:Problems.Count) {
         $header.Subtitle.Text = 'Finished, with problems'; $summary.ForeColor = $Theme.Warn
         $summary.Text = ('Some steps did not complete. Details were saved to:' + "`r`n" + $LogPath)
