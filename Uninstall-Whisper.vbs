@@ -1,14 +1,16 @@
 Option Explicit
 
-' Windows Installed apps uses this silent shim. The PowerShell file is copied
-' out of the install directory first, so it can safely remove that directory.
-Dim shell, fso, folder, tempFolder, setupCopy, args
+' Windows Installed apps opens Evora's branded uninstaller with no console
+' window. The native host owns the visible process, just as Frivo does.
+Dim shell, fso, folder, scriptPath, host, args
 Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 folder = fso.GetParentFolderName(WScript.ScriptFullName)
-tempFolder = shell.ExpandEnvironmentStrings("%TEMP%") & "\Whisper-Uninstall"
-If Not fso.FolderExists(tempFolder) Then fso.CreateFolder(tempFolder)
-setupCopy = tempFolder & "\Install-Whisper.ps1"
-fso.CopyFile folder & "\Install-Whisper.ps1", setupCopy, True
-args = "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File """ & setupCopy & """ -Uninstall -InstallPath """ & folder & """"
-shell.Run "powershell.exe " & args, 0, False
+scriptPath = folder & "\Evora-Uninstall.ps1"
+host = folder & "\EvoraSetupHost.exe"
+If fso.FileExists(host) And fso.FileExists(scriptPath) Then
+    shell.Run Chr(34) & host & Chr(34) & " --script " & Chr(34) & scriptPath & Chr(34), 0, False
+Else
+    args = "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File """ & scriptPath & """"
+    shell.Run "powershell.exe " & args, 0, False
+End If
