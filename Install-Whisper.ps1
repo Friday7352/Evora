@@ -137,71 +137,138 @@ function New-Shortcut([string] $Target, [string] $Link, [string] $WorkingDirecto
     $shortcut.Save()
 }
 
-function Install-Whisper([scriptblock] $Progress) {
-    & $Progress 5 'Preparing Whisper…'
+function Install-Whisper([scriptblock] $OnProgress, [bool] $AllowLan = $true) {
+    & $OnProgress 5 'Preparing Whisper…'
     Copy-ProgramFiles $InstallPath
-    & $Progress 18 'Installing the stable Python runtime…'
+    & $OnProgress 18 'Installing the stable Python runtime…'
     $python = Install-Python311
-    & $Progress 34 'Creating Whisper’s private Python environment…'
+    & $OnProgress 34 'Creating Whisper’s private Python environment…'
     $venv = Join-Path $InstallPath '.venv'
     if (Test-Path -LiteralPath $venv) { Remove-Item -LiteralPath $venv -Recurse -Force }
     Invoke-Checked -FilePath $python -Arguments @('-m', 'venv', $venv) -WorkingDirectory $InstallPath
     $venvPython = Join-Path $venv 'Scripts\python.exe'
-    & $Progress 48 'Installing Whisper and GPU-compatible libraries…'
+    & $OnProgress 48 'Installing Whisper and GPU-compatible libraries…'
     Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--upgrade', 'pip') -WorkingDirectory $InstallPath
     Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--no-input', '--disable-pip-version-check', '-r', 'requirements.txt') -WorkingDirectory $InstallPath
-    & $Progress 78 'Allowing Frivo to connect on your private network…'
-    Add-WhisperFirewallRule $InstallPath
-    & $Progress 88 'Registering Whisper to start automatically…'
+    & $OnProgress 78 'Configuring network access…'
+    if ($AllowLan) { Add-WhisperFirewallRule $InstallPath }
+    & $OnProgress 88 'Registering Whisper to start automatically…'
     Register-WhisperTask $InstallPath
     $desktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
     New-Shortcut -Target (Join-Path $InstallPath 'StartWhisper.bat') -Link (Join-Path $desktop 'Whisper.lnk') -WorkingDirectory $InstallPath
-    & $Progress 100 'Whisper is ready.'
+    & $OnProgress 100 'Whisper is ready.'
 }
 
 if ($Silent) {
-    try { Install-Whisper { param($percent, $message) Write-Host ("{0}%  {1}" -f $percent, $message) }; exit 0 }
+    try { Install-Whisper -OnProgress { param($percent, $message) Write-Host ("{0}%  {1}" -f $percent, $message) }; exit 0 }
     catch { Write-Error $_; exit 1 }
 }
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-[Windows.Forms.Application]::EnableVisualStyles()
+[System.Windows.Forms.Application]::EnableVisualStyles()
 
-$bg = [Drawing.Color]::FromArgb(13,17,23)
-$surface = [Drawing.Color]::FromArgb(22,27,34)
-$card = [Drawing.Color]::FromArgb(28,35,45)
-$ink = [Drawing.Color]::FromArgb(232,238,247)
-$dim = [Drawing.Color]::FromArgb(154,163,178)
-$accent = [Drawing.Color]::FromArgb(250,47,47)
+# These are the same Win32 touches used by Frivo Setup: native dark window
+# chrome and rounded surfaces instead of the stock Windows controls.
+$script:WhisperGdiReady = $false
+try {
+    $gdiDefinition = @'
+[DllImport("gdi32.dll")]
+public static extern IntPtr CreateRoundRectRgn(int l, int t, int r, int b, int w, int h);
+'@
+    Add-Type -Namespace WhisperSetupNative -Name Gdi -MemberDefinition $gdiDefinition -ErrorAction Stop
+    $script:WhisperGdiReady = $true
+} catch { $script:WhisperGdiReady = ($null -ne ('WhisperSetupNative.Gdi' -as [type])) }
+
+$script:WhisperDwmReady = $false
+try {
+    $dwmDefinition = @'
+[DllImport("dwmapi.dll")]
+public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int valueSize);
+'@
+    Add-Type -Namespace WhisperSetupNative -Name Dwm -MemberDefinition $dwmDefinition -ErrorAction Stop
+    $script:WhisperDwmReady = $true
+} catch { $script:WhisperDwmReady = ($null -ne ('WhisperSetupNative.Dwm' -as [type])) }
+
+function Set-WhisperRounded($Control, [int] $Radius = 12) {
+    if (-not $script:WhisperGdiReady) { return }
+    $handler = {
+        param($sender, $eventArgs)
+        $region = [WhisperSetupNative.Gdi]::CreateRoundRectRgn(0, 0, $sender.Width + 1, $sender.Height + 1, $Radius, $Radius)
+        $sender.Region = [System.Drawing.Region]::FromHrgn($region)
+    }.GetNewClosure()
+    $Control.Add_Resize($handler)
+    & $handler $Control $null
+}
+
+function Set-WhisperWindowChrome($Window, $Theme) {
+    if (-not $script:WhisperDwmReady) { return }
+    $apply = {
+        try {
+            $dark = 1; $caption = $Theme.Bg.ToArgb(); $text = $Theme.Ink.ToArgb(); $border = $Theme.Hair.ToArgb()
+            [void][WhisperSetupNative.Dwm]::DwmSetWindowAttribute($Window.Handle, 20, [ref]$dark, 4)
+            [void][WhisperSetupNative.Dwm]::DwmSetWindowAttribute($Window.Handle, 35, [ref]$caption, 4)
+            [void][WhisperSetupNative.Dwm]::DwmSetWindowAttribute($Window.Handle, 36, [ref]$text, 4)
+            [void][WhisperSetupNative.Dwm]::DwmSetWindowAttribute($Window.Handle, 34, [ref]$border, 4)
+        } catch { }
+    }.GetNewClosure()
+    $Window.Add_HandleCreated(({ & $apply }).GetNewClosure())
+}
+
+$theme = [pscustomobject]@{
+    Bg = [Drawing.Color]::FromArgb(13,17,23); Surface = [Drawing.Color]::FromArgb(22,27,34)
+    Card = [Drawing.Color]::FromArgb(28,35,45); CardHi = [Drawing.Color]::FromArgb(50,61,76)
+    Hair = [Drawing.Color]::FromArgb(42,50,62); Ink = [Drawing.Color]::FromArgb(232,238,247)
+    Dim = [Drawing.Color]::FromArgb(154,163,178); Accent = [Drawing.Color]::FromArgb(250,47,47)
+    AccentH = [Drawing.Color]::FromArgb(255,82,82); AccentP = [Drawing.Color]::FromArgb(216,31,31)
+}
+$bg = $theme.Bg; $surface = $theme.Surface; $card = $theme.Card; $ink = $theme.Ink; $dim = $theme.Dim; $accent = $theme.Accent
 
 $form = New-Object Windows.Forms.Form
 $form.Text = 'Whisper Setup'
-$form.ClientSize = [Drawing.Size]::new(620,420)
+$form.ClientSize = [Drawing.Size]::new(620,440)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedDialog'
 $form.MaximizeBox = $false
+$form.MinimizeBox = $false
 $form.BackColor = $bg
 $form.Font = [Drawing.Font]::new('Segoe UI',10)
+Set-WhisperWindowChrome $form $theme
 
 function Add-Label($text,$x,$y,$w,$h,$font,$color) {
     $label = New-Object Windows.Forms.Label
     $label.Text=$text; $label.Location=[Drawing.Point]::new($x,$y); $label.Size=[Drawing.Size]::new($w,$h)
-    $label.Font=$font; $label.ForeColor=$color; $label.BackColor=$bg
+    $label.Font=$font; $label.ForeColor=$color; $label.BackColor=[Drawing.Color]::Transparent
     $form.Controls.Add($label); return $label
 }
 function Add-Button($text,$x,$y,$w,$primary) {
     $button = New-Object Windows.Forms.Button
     $button.Text=$text; $button.Location=[Drawing.Point]::new($x,$y); $button.Size=[Drawing.Size]::new($w,38)
-    $button.FlatStyle='Flat'; $button.FlatAppearance.BorderSize=0; $button.Font=[Drawing.Font]::new('Segoe UI Semibold',10)
-    $button.BackColor=if($primary){$accent}else{$card}; $button.ForeColor=$ink
+    $button.FlatStyle='Flat'; $button.Font=[Drawing.Font]::new('Segoe UI Semibold',10); $button.Cursor=[Windows.Forms.Cursors]::Hand
+    if($primary){
+        $button.FlatAppearance.BorderSize=0; $button.BackColor=$accent; $button.ForeColor=[Drawing.Color]::White
+        $button.FlatAppearance.MouseOverBackColor=$theme.AccentH; $button.FlatAppearance.MouseDownBackColor=$theme.AccentP
+    } else {
+        $button.FlatAppearance.BorderSize=1; $button.FlatAppearance.BorderColor=$theme.Hair; $button.BackColor=$card; $button.ForeColor=$ink
+        $button.FlatAppearance.MouseOverBackColor=$theme.CardHi
+    }
+    Set-WhisperRounded $button 14
     $form.Controls.Add($button); return $button
 }
 
-[void](Add-Label 'Whisper Setup' 28 22 560 36 ([Drawing.Font]::new('Segoe UI Semibold',20)) $ink)
-[void](Add-Label 'Private, local transcription for Frivo' 30 58 560 22 ([Drawing.Font]::new('Segoe UI',10)) $dim)
+$mark = New-Object Windows.Forms.Panel
+$mark.Location=[Drawing.Point]::new(28,22); $mark.Size=[Drawing.Size]::new(36,36); $mark.BackColor=$accent
+Set-WhisperRounded $mark 12
+$markText = New-Object Windows.Forms.Label
+$markText.Text='W'; $markText.Location=[Drawing.Point]::new(0,4); $markText.Size=[Drawing.Size]::new(36,28)
+$markText.Font=[Drawing.Font]::new('Segoe UI Semibold',12); $markText.ForeColor=[Drawing.Color]::White
+$markText.BackColor=[Drawing.Color]::Transparent; $markText.TextAlign='MiddleCenter'
+$mark.Controls.Add($markText); $form.Controls.Add($mark)
+[void](Add-Label 'Whisper Setup' 78 18 500 36 ([Drawing.Font]::new('Segoe UI Semibold',19)) $ink)
+[void](Add-Label 'Private, local transcription for Frivo' 80 57 500 22 ([Drawing.Font]::new('Segoe UI',9)) $dim)
 $panel = New-Object Windows.Forms.Panel
 $panel.Location=[Drawing.Point]::new(24,96); $panel.Size=[Drawing.Size]::new(572,210); $panel.BackColor=$surface
+Set-WhisperRounded $panel 18
 $form.Controls.Add($panel)
 $summary = New-Object Windows.Forms.Label
 $summary.Location=[Drawing.Point]::new(20,18); $summary.Size=[Drawing.Size]::new(532,160); $summary.BackColor=$surface; $summary.ForeColor=$ink
@@ -214,12 +281,21 @@ labelling tools, opens private-network access for Frivo, and starts Whisper
 automatically after Windows restarts. The first launch downloads the model.
 "@
 $panel.Controls.Add($summary)
-$progress = New-Object Windows.Forms.ProgressBar
-$progress.Location=[Drawing.Point]::new(28,324); $progress.Size=[Drawing.Size]::new(564,14); $progress.Style='Continuous'
-$form.Controls.Add($progress)
+$track = New-Object Windows.Forms.Panel
+$track.Location=[Drawing.Point]::new(28,324); $track.Size=[Drawing.Size]::new(564,10); $track.BackColor=$card
+Set-WhisperRounded $track 10; $form.Controls.Add($track)
+$fill = New-Object Windows.Forms.Panel
+$fill.Location=[Drawing.Point]::new(0,0); $fill.Size=[Drawing.Size]::new(0,10); $fill.BackColor=$accent
+Set-WhisperRounded $fill 10; $track.Controls.Add($fill)
+$script:progressBar = [pscustomobject]@{ Fill=$fill; Width=564; Value=0 }
+$script:progressBar | Add-Member -MemberType ScriptMethod -Name SetValue -Value {
+    param([int]$Percent)
+    $this.Value=[Math]::Min(100,[Math]::Max(0,$Percent))
+    $this.Fill.Size=[Drawing.Size]::new([int]($this.Width*$this.Value/100),$this.Fill.Size.Height)
+}
 $status = Add-Label 'Ready to install.' 28 344 564 24 ([Drawing.Font]::new('Segoe UI',9)) $dim
-$install = Add-Button 'Install Whisper' 354 372 150 $true
-$cancel = Add-Button 'Cancel' 516 372 80 $false
+$install = Add-Button 'Install Whisper' 354 390 150 $true
+$cancel = Add-Button 'Cancel' 516 390 80 $false
 $script:completed = $false
 
 $cancel.Add_Click({ $form.Close() })
@@ -227,9 +303,11 @@ $install.Add_Click({
     if ($script:completed) { $form.Close(); return }
     $install.Enabled=$false; $cancel.Enabled=$false
     try {
-        Install-Whisper {
+        Install-Whisper -OnProgress {
             param($percent,$message)
-            $progress.Value=[Math]::Min(100,[Math]::Max(0,$percent)); $status.Text=$message
+            # $OnProgress is the callback parameter inside Install-Whisper.
+            # This separate name avoids the old self-reference crash here.
+            $script:progressBar.SetValue($percent); $status.Text=$message
             [Windows.Forms.Application]::DoEvents()
         }
         $summary.Text = "Whisper is installed and starting now.`r`n`r`nIn Frivo, open Settings → Providers → Local Whisper and use:`r`nhttp://localhost:9000 (same PC) or this computer's LAN address.`r`n`r`nThe first model download may take a few minutes."
@@ -237,7 +315,7 @@ $install.Add_Click({
     } catch {
         Write-SetupLog ('FAILED: ' + $_.Exception.Message)
         $status.Text='Setup failed — see ' + $LogPath
-        [Windows.Forms.MessageBox]::Show($_.Exception.Message + "`r`n`r`nDetails: $LogPath", 'Whisper Setup', 'OK', 'Error') | Out-Null
+        [Windows.Forms.MessageBox]::Show($_.Exception.Message + "`r`n`r`nDetails: $LogPath", 'Whisper Setup', [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Error) | Out-Null
         $install.Enabled=$true; $cancel.Enabled=$true
     }
 })
