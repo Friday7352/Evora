@@ -92,8 +92,9 @@ function Test-EvoraLegacyOwnership {
         $known = $knownPaths | Where-Object {
             [IO.Path]::GetFullPath($_).TrimEnd('\', '/').Equals($normalizedRoot, [StringComparison]::OrdinalIgnoreCase)
         }
-        return $known -and (Test-Path -LiteralPath (Join-Path $Root 'whisper_server.py') -PathType Leaf) -and
-            ((Test-Path -LiteralPath (Join-Path $Root 'EvoraHost.exe') -PathType Leaf) -or (Test-Path -LiteralPath (Join-Path $Root 'Install-Whisper.ps1') -PathType Leaf))
+        $hasServer = (Test-Path -LiteralPath (Join-Path $Root 'evora_server.py') -PathType Leaf) -or (Test-Path -LiteralPath (Join-Path $Root 'whisper_server.py') -PathType Leaf)
+        $hasInstaller = (Test-Path -LiteralPath (Join-Path $Root 'Install-Evora.ps1') -PathType Leaf) -or (Test-Path -LiteralPath (Join-Path $Root 'Install-Whisper.ps1') -PathType Leaf)
+        return $known -and $hasServer -and ((Test-Path -LiteralPath (Join-Path $Root 'EvoraHost.exe') -PathType Leaf) -or $hasInstaller)
     } catch { return $false }
 }
 
@@ -244,7 +245,7 @@ if ($Silent) {
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
-Import-Module (Join-Path $Root 'Whisper.Ui.psm1') -Force
+Import-Module (Join-Path $Root 'Evora.Ui.psm1') -Force
 $Theme = Get-FrivoTheme
 $form = New-FrivoForm -Theme $Theme -Title 'Uninstall Evora' -Width 500 -Height 430 -IconPath (Join-Path $Root 'EvoraIcon.ico')
 $header = New-FrivoHeader -Theme $Theme -Form $form -Title 'Uninstall Evora' -Subtitle $Root -LogoPngPath (Join-Path $Root 'Evora.png')

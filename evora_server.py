@@ -1,76 +1,4 @@
-# === whisper_server.py ===
-# 2070 BOX      ->  Whisper\whisper_server.py
-"""
-Local Whisper transcription service
------------------------------------
-Run this on the machine with the GPU (your 2070 Super box). The main Voice
-Console app on the other server calls it over the LAN instead of sending
-audio to OpenAI.
-
-Why bother:
-  - Free. Transcription is the one genuinely recurring cost once the
-    listening feature runs continuously.
-  - Usually FASTER than OpenAI, because there's no round trip to the
-    internet — a few seconds of speech transcribes in well under a second
-    on a 2070 Super.
-  - Private. Audio never leaves your network.
-  - Auto-detects the spoken language, so you don't have to tell it what
-    you're about to speak.
-
-What it can't do: separate people talking over each other. Whisper
-transcribes a single stream and locks onto the dominant voice. That's a
-property of the model, not this script.
-
-Setup (on the GPU machine)
---------------------------
-1. Install PyTorch with CUDA support, then:
-
-       pip install faster-whisper flask waitress
-
-   faster-whisper pulls in CTranslate2, which does the actual GPU work.
-   On Windows you may also need the cuBLAS/cuDNN DLLs — if you get a
-   "Library cublas64_12.dll is not found" error on startup, install the
-   NVIDIA CUDA Toolkit runtime, or follow the faster-whisper README's
-   Windows notes.
-
-2. Run it:
-
-       python whisper_server.py
-
-   First run downloads the model (~500MB for "small"), which takes a minute.
-   After that it's cached and starts in seconds.
-
-3. In Voice Console's Settings, set Transcription to "Local Whisper" and the
-   address to http://<this-machine's-IP>:9000
-
-Configuration (environment variables, all optional)
----------------------------------------------------
-  WHISPER_MODEL    tiny | base | small | medium | large-v3
-                     default: medium on GPU, small on CPU
-  WHISPER_DEVICE   cuda | cpu | auto                       (default: auto)
-  WHISPER_COMPUTE  float16 | int8_float16 | int8 | float32
-                     default: float16 on GPU, int8 on CPU
-  WHISPER_VAD      1 | 0 — trim silence before transcribing (default: 1)
-  WHISPER_PORT     port to listen on                       (default: 9000)
-
-Choosing a model on 8GB of VRAM:
-  small     — fastest. Noticeably weaker on accents, names and noisy audio;
-              worth it only when something else needs the VRAM.
-  medium    — the default on GPU. ~3GB at float16, clearly more accurate
-              than small, still fast on a 2070-class card.
-  large-v3  — best accuracy, ~5GB at float16. Fine on its own; will not
-              comfortably share the card with an Ollama model.
-
-If you also run Ollama on this machine, set WHISPER_MODEL=small and
-WHISPER_COMPUTE=int8_float16 to give the VRAM back.
-
-If transcriptions come back fluent but wrong — sentences that were never
-said — that's Whisper hallucinating on short or unclear audio. The two
-guards against it (condition_on_previous_text=False and a temperature
-fallback) are already applied below. Moving up a model size helps further.
-
-There's no authentication here. Keep it on your private network.
-"""
+"""Evora's local OpenAI-compatible transcription service."""
 
 import gc
 import os
@@ -79,13 +7,7 @@ import tempfile
 import threading
 import time
 
-# Without this, output vanishes whenever this is run as a service.
-#
-# Python buffers stdout in blocks when it isn't a terminal, so redirecting
-# to a log file means nothing appears until the buffer fills or the process
-# exits. A service that's busy loading a model therefore looks like a
-# service that died silently — the log is empty precisely when you most
-# need it.
+# Keep startup and error output visible in the service log.
 try:
     sys.stdout.reconfigure(line_buffering=True)
     sys.stderr.reconfigure(line_buffering=True)

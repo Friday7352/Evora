@@ -77,7 +77,7 @@ function Set-EvoraStartupMode([bool] $Enabled) {
     $cache = Join-Path $Root 'model_cache'
     $ecapa = Join-Path $Root 'ecapa_model'
     $prefix = "set HF_HOME=$cache&& set HUGGINGFACE_HUB_CACHE=$cache&& set TORCH_HOME=$cache&& set SPEECHBRAIN_CACHE=$ecapa&& "
-    $command = "$prefix`"$python`" -u `"$Root\whisper_server.py`" >> `"$log`" 2>&1"
+    $command = "$prefix`"$python`" -u `"$Root\evora_server.py`" >> `"$log`" 2>&1"
     $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument ('/c "{0}"' -f $command) -WorkingDirectory $Root
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
@@ -147,7 +147,7 @@ if (-not $createdMutex) {
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
-Import-Module (Join-Path $Root 'Whisper.Ui.psm1') -Force
+Import-Module (Join-Path $Root 'Evora.Ui.psm1') -Force
 $Theme = Get-FrivoTheme
 $IconPath = Join-Path $Root 'EvoraIcon.ico'
 $form = New-FrivoForm -Theme $Theme -Title 'Evora' -Width 470 -Height 570 -IconPath $IconPath

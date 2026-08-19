@@ -111,7 +111,9 @@ function Test-WhisperRecoverableResidue([string] $Path) {
         $default = [IO.Path]::GetFullPath((Join-Path $env:ProgramFiles 'Whisper')).TrimEnd('\', '/')
         $actual = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
         if (-not $actual.Equals($default, [StringComparison]::OrdinalIgnoreCase)) { return $false }
-        return (Test-Path -LiteralPath (Join-Path $actual 'whisper_server.py') -PathType Leaf) -or
+        return (Test-Path -LiteralPath (Join-Path $actual 'evora_server.py') -PathType Leaf) -or
+            (Test-Path -LiteralPath (Join-Path $actual 'whisper_server.py') -PathType Leaf) -or
+            (Test-Path -LiteralPath (Join-Path $actual 'Install-Evora.ps1') -PathType Leaf) -or
             (Test-Path -LiteralPath (Join-Path $actual 'Install-Whisper.ps1') -PathType Leaf)
     } catch { return $false }
 }
@@ -200,9 +202,9 @@ function Copy-ProgramFiles([string] $Destination) {
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
     $keep = @(
         '.gitattributes', '.gitignore', 'LICENSE', 'README.md', 'THIRD_PARTY_NOTICES.txt', 'requirements.txt',
-        'whisper_server.py', 'Install-Whisper.ps1', 'Uninstall-Whisper.vbs',
+        'evora_server.py', 'Install-Evora.ps1', 'Uninstall-Evora.vbs',
         'Evora-Uninstall.ps1', 'Evora-Launcher.ps1', 'EvoraHost.exe', 'EvoraSetupHost.exe',
-        'Whisper.Ui.psm1', 'Evora-Setup.ps1', 'Evora-Setup.vbs', 'Evora.png', 'EvoraIcon.ico'
+        'Evora.Ui.psm1', 'Evora-Setup.ps1', 'Evora-Setup.vbs', 'Evora.png', 'EvoraIcon.ico'
     )
     foreach ($name in $keep) {
         $from = Join-Path $SourceDir $name
@@ -286,7 +288,7 @@ function Register-WhisperTask([string] $Target, [bool] $StartWithWindows = $true
     $cache = Join-Path $Target 'model_cache'
     $ecapa = Join-Path $Target 'ecapa_model'
     $prefix = "set HF_HOME=$cache&& set HUGGINGFACE_HUB_CACHE=$cache&& set TORCH_HOME=$cache&& set SPEECHBRAIN_CACHE=$ecapa&& "
-    $command = "$prefix`"$python`" -u `"$Target\whisper_server.py`" >> `"$log`" 2>&1"
+    $command = "$prefix`"$python`" -u `"$Target\evora_server.py`" >> `"$log`" 2>&1"
     $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument ('/c "{0}"' -f $command) -WorkingDirectory $Target
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
@@ -300,7 +302,7 @@ function Register-WhisperTask([string] $Target, [bool] $StartWithWindows = $true
 
 function Register-WhisperInstalledApp([string] $Target) {
     $key = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Whisper'
-    $uninstaller = Join-Path $Target 'Uninstall-Whisper.vbs'
+    $uninstaller = Join-Path $Target 'Uninstall-Evora.vbs'
     New-Item -Path $key -Force | Out-Null
     New-ItemProperty -Path $key -Name 'DisplayName' -Value 'Evora' -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $key -Name 'DisplayVersion' -Value '1.0' -PropertyType String -Force | Out-Null

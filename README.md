@@ -39,10 +39,10 @@ Evora installation folder during setup.
 ## Repository layout
 
 The files at the repository root are the current, self-contained Evora release
-bundle. Keep them together when distributing or running setup.
+bundle. Keep them together when distributing or running setup. The active
+scripts and service are named `Evora`; the underlying Whisper dependency is
+identified in the third-party notices and license information.
 
-- `legacy/` contains pre-Evora Whisper launchers and manual task helpers. They
-  are retained only for reference and are not installed by current setup.
 - `build/` contains the native Windows host source and its build manifest.
 
 ## Requirements
