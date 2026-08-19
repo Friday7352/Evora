@@ -369,7 +369,11 @@ $timer.Start()
 $form.Add_FormClosing({
     param($sender, $eventArgs)
     if ($script:quitting -or $eventArgs.CloseReason -ne [System.Windows.Forms.CloseReason]::UserClosing) { return }
-    if ($script:launcherSettings.CloseAction -eq 'keep' -and $script:serviceRunning) {
+    # The user's close preference controls the launcher itself.  Do not make
+    # it depend on a momentary service-status probe: Evora can be starting,
+    # stopped, or temporarily unreachable and should still remain available
+    # from the tray when "Keep Evora running" is selected.
+    if ($script:launcherSettings.CloseAction -eq 'keep') {
         $eventArgs.Cancel = $true
         # Keep the same form/message loop alive, just as Frivo does.  This is
         # what keeps the notification-area icon and its menu registered.
