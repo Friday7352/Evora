@@ -369,6 +369,31 @@ function Stop-EvoraLauncherForUpdate([string] $Target) {
     return ($hosts.Count -gt 0)
 }
 
+function Stop-EvoraServiceForUpdate([string] $Target) {
+    # An update replaces the task definition at the end. Stop the current
+    # service first, otherwise its existing Python process can keep port 9000
+    # and cause the newly registered service to exit immediately.
+    $taskName = 'WhisperTranscriptionService'
+    try {
+        $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        $ownsTask = $task -and (($task.Actions | Out-String) -match [regex]::Escape($Target))
+        if ($ownsTask) {
+            Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 700
+        }
+    } catch { }
+
+    $venvPath = [IO.Path]::GetFullPath((Join-Path $Target '.venv')).TrimEnd('\', '/')
+    $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -in @('python.exe', 'pythonw.exe') -and $_.ExecutablePath -and
+            [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith($venvPath, [StringComparison]::OrdinalIgnoreCase)
+    })
+    foreach ($serviceProcess in $processes) {
+        try { Stop-Process -Id $serviceProcess.ProcessId -Force -ErrorAction Stop } catch { }
+    }
+    if ($processes.Count) { Start-Sleep -Milliseconds 400 }
+}
+
 function Uninstall-Whisper([string] $Target) {
     $existing = Get-ExistingWhisperInstall $Target
     if ($existing.State -eq 'None') {
@@ -424,6 +449,8 @@ function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $Al
     if (Test-WhisperInstallOwnership $Target) {
         & $OnProgress 8 'Closing any running Evora window...'
         [void] (Stop-EvoraLauncherForUpdate $Target)
+        & $OnProgress 9 'Stopping the existing Evora service...'
+        Stop-EvoraServiceForUpdate $Target
     }
     if ($Repair) {
         & $OnProgress 10 'Preparing the previous Evora installation...'
