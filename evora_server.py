@@ -699,6 +699,12 @@ AVAILABLE_MODELS = [
 # model out from under a running request.
 MODEL_LOCK = threading.Lock()
 
+# The GPU model handles one clip at a time. Reject overlap immediately rather
+# than letting requests occupy every Waitress worker while they wait; health
+# and the status page must remain responsive even when a client sends live
+# partials faster than the model can process them.
+TRANSCRIBE_LOCK = threading.Lock()
+
 
 def load_model(name):
     """
@@ -987,9 +993,17 @@ def transcribe():
     # Whisper needs a real file path; the upload only exists in memory.
     suffix = os.path.splitext(audio.filename or "")[1] or ".webm"
     tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    owns_transcription = False
     try:
         audio.save(tmp.name)
         tmp.close()
+
+        owns_transcription = TRANSCRIBE_LOCK.acquire(blocking=False)
+        if not owns_transcription:
+            return jsonify({
+                "error": "Evora is already processing another audio segment. Try again shortly.",
+                "busy": True,
+            }), 429
 
         # Blank means auto-detect, which is one of the main advantages of
         # running Whisper over the browser's recogniser.
@@ -1000,32 +1014,34 @@ def transcribe():
         # mid-transcription.
         with MODEL_LOCK:
             active = model
-        segments, info = active.transcribe(
-            tmp.name,
-            language=language,
-            beam_size=5,
-            # Each clip here is an independent utterance, not a continuation
-            # of the last one. Left on (the default), Whisper feeds the
-            # previous transcript in as context and will happily invent text
-            # that follows on from it — so a short or unclear clip comes back
-            # as a fluent sentence that was never said. That is the classic
-            # Whisper hallucination, and on a stream of short dictations it
-            # is the single biggest source of confidently wrong output.
-            condition_on_previous_text=False,
-            # If greedy decoding produces a low-confidence or repetitive
-            # result, retry with progressively more randomness rather than
-            # returning the first bad answer.
-            temperature=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
-            # Discard segments the model itself considers probably silence,
-            # instead of transcribing room tone into words.
-            no_speech_threshold=0.6,
-            # Drops silence before it reaches the model. On a stream that's
-            # mostly quiet — which is what listening to a conversation looks
-            # like — this is a large speedup.
-            vad_filter=USE_VAD,
-            vad_parameters={"min_silence_duration_ms": 500} if USE_VAD else None,
-        )
-        text = " ".join(segment.text.strip() for segment in segments).strip()
+            segments, info = active.transcribe(
+                tmp.name,
+                language=language,
+                beam_size=5,
+                # Each clip here is an independent utterance, not a continuation
+                # of the last one. Left on (the default), Whisper feeds the
+                # previous transcript in as context and will happily invent text
+                # that follows on from it — so a short or unclear clip comes back
+                # as a fluent sentence that was never said. That is the classic
+                # Whisper hallucination, and on a stream of short dictations it
+                # is the single biggest source of confidently wrong output.
+                condition_on_previous_text=False,
+                # If greedy decoding produces a low-confidence or repetitive
+                # result, retry with progressively more randomness rather than
+                # returning the first bad answer.
+                temperature=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+                # Discard segments the model itself considers probably silence,
+                # instead of transcribing room tone into words.
+                no_speech_threshold=0.6,
+                # Drops silence before it reaches the model. On a stream that's
+                # mostly quiet — which is what listening to a conversation looks
+                # like — this is a large speedup.
+                vad_filter=USE_VAD,
+                vad_parameters={"min_silence_duration_ms": 500} if USE_VAD else None,
+            )
+            # faster-whisper returns a lazy segment generator; consuming it is
+            # the actual inference work and must remain inside MODEL_LOCK.
+            text = " ".join(segment.text.strip() for segment in segments).strip()
         elapsed = time.perf_counter() - started
 
         # Only fingerprint clips that actually contained speech — running it
@@ -1088,6 +1104,8 @@ def transcribe():
         print(f"  transcription failed: {e!r}")
         return jsonify({"error": str(e)}), 500
     finally:
+        if owns_transcription:
+            TRANSCRIBE_LOCK.release()
         try:
             os.unlink(tmp.name)
         except Exception:
