@@ -187,18 +187,9 @@ except Exception as _ecapa_error:
         SPEAKER_ENABLED = True
         SPEAKER_BACKEND = "resemblyzer"
     except Exception as _speaker_import_error:
-        # Deliberately broad, and deliberately keeps the message.
-        #
-        # "Not installed" is only one of the ways this import fails. These
-        # packages pull in torch, librosa and webrtcvad, and any of those
-        # can be present but unimportable — webrtcvad is a C extension
-        # needing build tools on Windows, and torch fails outright if it has
-        # no wheel for the running Python version. Catching bare ImportError
-        # and discarding the message turns every one of those into the same
-        # unhelpful "install it with pip", which is wrong advice when it IS
-        # installed.
         SPEAKER_IMPORT_ERROR = (
-            f"{type(_speaker_import_error).__name__}: {_speaker_import_error}"
+            f"ECAPA: {type(_ecapa_error).__name__}: {_ecapa_error}; "
+            f"fallback: {type(_speaker_import_error).__name__}: {_speaker_import_error}"
         )
 
 # Cosine similarity above which two clips are considered the same person.
