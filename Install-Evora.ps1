@@ -246,6 +246,17 @@ function Add-WhisperFirewallRule([string] $Target) {
     Remove-WhisperFirewallRule $Target
     New-NetFirewallRule -DisplayName 'Whisper transcription service' -Direction Inbound -Action Allow `
         -Protocol TCP -LocalPort 9000 -Program $python -Profile Private -RemoteAddress LocalSubnet | Out-Null
+    if (-not (Test-WhisperFirewallRule $Target)) {
+        throw 'Windows could not verify Evora private-network access.'
+    }
+}
+
+function Test-WhisperFirewallRule([string] $Target) {
+    $python = Join-Path $Target '.venv\Scripts\python.exe'
+    return $null -ne (Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue | Where-Object {
+        $application = Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $_ -ErrorAction SilentlyContinue
+        $application -and $application.Program -and $application.Program.Equals($python, [StringComparison]::OrdinalIgnoreCase)
+    } | Select-Object -First 1)
 }
 
 function Remove-WhisperFirewallRule([string] $Target) {

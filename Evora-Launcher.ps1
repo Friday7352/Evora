@@ -65,6 +65,40 @@ function Remove-EvoraFirewallRule {
     Get-EvoraFirewallRules | Remove-NetFirewallRule -ErrorAction SilentlyContinue
 }
 
+function ConvertTo-EvoraArgumentString([string[]] $Arguments) {
+    if ($null -eq $Arguments -or $Arguments.Count -eq 0) { return '' }
+    $parts = foreach ($argument in $Arguments) {
+        $text = [string] $argument
+        if ($text -eq '') { '""' }
+        elseif ($text -match '[\s"]') {
+            $escaped = [regex]::Replace($text, '(\\*)"', '$1$1\"')
+            $escaped = [regex]::Replace($escaped, '(\\+)$', '$1$1')
+            '"' + $escaped + '"'
+        } else { $text }
+    }
+    return ($parts -join ' ')
+}
+
+function Invoke-EvoraFirewallCommand([string[]] $Arguments) {
+    $process = Start-Process -FilePath 'netsh.exe' -Verb RunAs -Wait -PassThru -WindowStyle Hidden `
+        -ArgumentList (ConvertTo-EvoraArgumentString $Arguments)
+    return $process.ExitCode -eq 0
+}
+
+function Enable-EvoraNetworkAccess {
+    $python = Join-Path $Root '.venv\Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { return $false }
+    try {
+        [void](Invoke-EvoraFirewallCommand @('advfirewall', 'firewall', 'delete', 'rule', 'name=Whisper transcription service', ('program=' + $python)))
+        $added = Invoke-EvoraFirewallCommand @(
+            'advfirewall', 'firewall', 'add', 'rule', 'name=Whisper transcription service',
+            'dir=in', 'action=allow', ('program=' + $python), 'profile=private',
+            'remoteip=localsubnet', 'protocol=TCP', 'localport=9000'
+        )
+        return $added -and @(Get-EvoraFirewallRules).Count -gt 0
+    } catch { return $false }
+}
+
 function Set-EvoraStartupMode([bool] $Enabled) {
     $python = Join-Path $Root '.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
@@ -123,12 +157,7 @@ if ($requestedAction) {
         'Stop' { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue }
         'EnableStartup' { Set-EvoraStartupMode $true }
         'DisableStartup' { Set-EvoraStartupMode $false }
-        'EnableLan' {
-            $python = Join-Path $Root '.venv\Scripts\python.exe'
-            if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw 'Evora is not fully installed yet.' }
-            Remove-EvoraFirewallRule
-            New-NetFirewallRule -DisplayName 'Whisper transcription service' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 9000 -Program $python -Profile Private -RemoteAddress LocalSubnet | Out-Null
-        }
+        'EnableLan' { if (-not (Enable-EvoraNetworkAccess)) { throw 'Windows could not open Evora private-network access.' } }
         'DisableLan' { Remove-EvoraFirewallRule }
     }
     exit 0
@@ -235,10 +264,7 @@ function Test-EvoraStartupEnabled {
 }
 
 function Test-EvoraNetworkEnabled {
-    # Frivo treats its named private-network rule as the switch for showing
-    # the LAN card.  Mirror that behavior here so an already-open port is
-    # immediately visible in the main launcher.
-    return $null -ne (Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue | Select-Object -First 1)
+    return @(Get-EvoraFirewallRules).Count -gt 0
 }
 
 function Test-EvoraServerUp {
@@ -255,6 +281,22 @@ function Test-EvoraServerUp {
     } finally {
         $client.Close()
     }
+}
+
+function Invoke-EvoraLauncherAction([string] $Action) {
+    $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden',
+        '-File', ('"{0}"' -f $PSCommandPath), $Action
+    )
+    return $process.ExitCode -eq 0
+}
+
+function Wait-EvoraServiceStopped {
+    for ($attempt = 0; $attempt -lt 15; $attempt++) {
+        if (-not (Test-EvoraServerUp)) { return $true }
+        Start-Sleep -Milliseconds 200
+    }
+    return -not (Test-EvoraServerUp)
 }
 
 function Get-EvoraLanIp {
@@ -360,17 +402,44 @@ $copy.Add_Click({ try { [System.Windows.Forms.Clipboard]::SetText($localUrl.Text
 $lanCopy.Add_Click({ try { [System.Windows.Forms.Clipboard]::SetText($lanUrl.Text); $lanCopy.Text = 'Copied' } catch { } })
 $btnOpen.Add_Click({
     if ($btnOpen.Text -eq 'Start Evora') {
-        $script:startRequestedUntil = [DateTime]::Now.AddSeconds(15)
         $status.Text = 'Starting...'; $dot.BackColor = $Theme.Warn
         $btnOpen.Text = 'Starting Evora...'; $btnOpen.Enabled = $false
-        Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-Start')
-        $script:nextStatusPoll = [DateTime]::MinValue
+        [System.Windows.Forms.Application]::DoEvents()
+        if (Invoke-EvoraLauncherAction '-Start') {
+            $script:startRequestedUntil = [DateTime]::Now.AddSeconds(20)
+            $script:nextStatusPoll = [DateTime]::MinValue
+        } else {
+            $status.Text = 'Stopped'; $dot.BackColor = $Theme.Faint
+            $btnOpen.Text = 'Start Evora'; $btnOpen.Enabled = $true
+            [System.Windows.Forms.MessageBox]::Show(
+                'Evora could not be started. Open the service log for details.',
+                'Evora', [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Warning
+            ) | Out-Null
+        }
     } else { Start-Process $localUrl.Text }
 })
 $btnPower.Add_Click({
     $status.Text = 'Stopping...'; $btnPower.Enabled = $false
-    Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-Stop')
-    $script:nextStatusPoll = [DateTime]::MinValue
+    [System.Windows.Forms.Application]::DoEvents()
+    if ((Invoke-EvoraLauncherAction '-Stop') -and (Wait-EvoraServiceStopped)) {
+        $script:serviceRunning = $false
+        $script:startRequestedUntil = [DateTime]::MinValue
+        $status.Text = 'Stopped'; $dot.BackColor = $Theme.Faint
+        $modelSummary.Text = 'Not running'; $deviceSummary.Text = 'Not running'
+        $activeModel.Text = 'Not running'; $activeDevice.Text = 'Not running'
+        $note.Text = 'Evora can start automatically with Windows.'
+        $btnOpen.Text = 'Start Evora'; $btnOpen.Enabled = $true
+        $btnPower.Text = 'Stop Evora'; $btnPower.Enabled = $false
+        $script:nextStatusPoll = [DateTime]::MinValue
+    } else {
+        $btnPower.Text = 'Stop Evora'; $btnPower.Enabled = $true
+        [System.Windows.Forms.MessageBox]::Show(
+            'Evora did not stop completely. Try again, then check the service log if it continues.',
+            'Evora', [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+    }
 })
 $btnSettings.Add_Click({
     $script:loadingSettings = $true
@@ -399,9 +468,29 @@ $startupCheck.Add_CheckedChanged({
 $networkAction.Add_Click({
     $networkAction.Enabled = $false
     $networkAction.Text = 'Opening...'
-    Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-EnableLan')
-    $script:nextNetworkCheck = [DateTime]::MinValue
-    $script:nextStatusPoll = [DateTime]::MinValue
+    [System.Windows.Forms.Application]::DoEvents()
+    if (Enable-EvoraNetworkAccess) {
+        $script:portOpen = $true
+        $script:lanAddress = Get-EvoraLanIp
+        if ($script:lanAddress) { $lanUrl.Text = ('http://{0}:9000' -f $script:lanAddress) }
+        Set-EvoraMainNetworkState ($null -ne $script:lanAddress)
+        Set-EvoraSettingsNetworkState $true
+        [System.Windows.Forms.MessageBox]::Show(
+            'Other devices on your private network can now connect to Evora.',
+            'Evora',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
+    } else {
+        $networkAction.Enabled = $true
+        $networkAction.Text = 'Try again'
+        [System.Windows.Forms.MessageBox]::Show(
+            'Windows could not open port 9000. Approve the administrator prompt, then try again.',
+            'Evora',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+    }
 })
 $btnLog.Add_Click({ $log = Join-Path $Root 'whisper_service.log'; if (Test-Path -LiteralPath $log) { Start-Process notepad.exe -ArgumentList ('"{0}"' -f $log) } })
 $btnFolder.Add_Click({ Start-Process explorer.exe -ArgumentList ('"{0}"' -f $Root) })
