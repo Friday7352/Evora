@@ -2,6 +2,7 @@
 
 import gc
 import os
+import socket
 import sys
 import tempfile
 import threading
@@ -779,12 +780,31 @@ print(f"  Ready in {time.perf_counter() - _load_start:.1f}s")
 app = Flask(__name__)
 
 
+def get_lan_address():
+    """Return this PC's preferred private-network IPv4 address, if known."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("8.8.8.8", 80))
+        address = probe.getsockname()[0]
+        return address if not address.startswith("127.") else None
+    except OSError:
+        try:
+            addresses = socket.gethostbyname_ex(socket.gethostname())[2]
+            return next((item for item in addresses if not item.startswith("127.")), None)
+        except OSError:
+            return None
+    finally:
+        probe.close()
+
+
 @app.route("/")
 def status_page():
     gpu = DEVICE == "cuda"
     device_label = "GPU (CUDA)" if gpu else "CPU"
     model_label = MODEL_NAME[:1].upper() + MODEL_NAME[1:]
-    address = f"http://{request.host}"
+    local_address = "http://evora.local:9000"
+    lan_ip = get_lan_address()
+    lan_address = f"http://{lan_ip}:9000" if lan_ip else "Not available"
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -819,13 +839,14 @@ def status_page():
     .label {{ color: #9185aa; font-size: 11px; font-weight: 700; letter-spacing: .7px; }}
     .value {{ margin-top: 7px; font-size: 18px; font-weight: 650; }}
     .gpu {{ color: #d4a7ff; }}
-    .connection {{ margin-top: 16px; padding: 17px; border-radius: 12px; background: #201733; border: 1px solid #44305f; }}
+    .connections {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }}
+    .connection {{ padding: 17px; border-radius: 12px; background: #201733; border: 1px solid #44305f; }}
     .connection .label {{ color: #cab7e5; }}
     code {{ display: block; margin-top: 7px; color: #fff; font: 600 16px ui-monospace, "Cascadia Code", Consolas, monospace; overflow-wrap: anywhere; }}
     .detail {{ margin: 16px 2px 0; color: #a89bbd; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }}
     footer {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 17px 8px 0; color: #8e839d; font-size: 12px; }}
     footer span {{ padding: 5px 9px; border: 1px solid #242b39; border-radius: 7px; background: #11151e; font-family: ui-monospace, monospace; }}
-    @media (max-width: 520px) {{ main {{ padding: 24px 0; }} .grid {{ grid-template-columns: 1fr; }} .card {{ padding: 20px; }} }}
+    @media (max-width: 620px) {{ main {{ padding: 24px 0; }} .grid, .connections {{ grid-template-columns: 1fr; }} .card {{ padding: 20px; }} }}
   </style>
 </head>
 <body>
@@ -843,7 +864,11 @@ def status_page():
         <div class="stat"><div class="label">PRECISION</div><div class="value">{COMPUTE_TYPE}</div></div>
         <div class="stat"><div class="label">SPEAKER LABELLING</div><div class="value">{'Available' if SPEAKER_ENABLED else 'Not available'}</div></div>
       </div>
-      <div class="connection"><div class="label">USE THIS ADDRESS IN FRIVO</div><code>{address}</code></div>
+      <div class="connections">
+        <div class="connection"><div class="label">ON THIS PC</div><code>{local_address}</code></div>
+        <div class="connection"><div class="label">OTHER DEVICES ON YOUR NETWORK</div><code>{lan_address}</code></div>
+      </div>
+      <p class="detail">The network address requires private-network access to be enabled in Evora settings.</p>
       <p class="detail">{DEVICE_REASON}</p>
     </section>
     <footer><span>GET /health</span><span>POST /v1/audio/transcriptions</span><span>Refreshes every 20 seconds</span></footer>
