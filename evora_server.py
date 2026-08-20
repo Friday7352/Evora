@@ -16,6 +16,10 @@ except Exception:
     pass
 
 
+CUDA_DLL_HANDLES = []
+CUDA_DLL_DIRECTORIES = []
+
+
 def register_cuda_dlls():
     """
     Makes the pip-installed CUDA libraries findable on Windows.
@@ -48,9 +52,13 @@ def register_cuda_dlls():
             bin_dir = os.path.join(root, lib, "bin")
             if os.path.isdir(bin_dir):
                 try:
-                    os.add_dll_directory(bin_dir)
+                    # Keep the handle alive for the lifetime of the process.
+                    # Releasing it removes the directory from Windows' DLL
+                    # search path again.
+                    CUDA_DLL_HANDLES.append(os.add_dll_directory(bin_dir))
                 except Exception:
                     pass
+                CUDA_DLL_DIRECTORIES.append(bin_dir)
                 os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
 
 
