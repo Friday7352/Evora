@@ -213,12 +213,22 @@ function Invoke-EvoraRemoval {
         } catch { Add-Step 'Keep downloaded models and GPU libraries' $false }
     }
 
+    # The marker is setup's proof of an active Evora installation. Remove it
+    # before the deferred folder cleanup so setup never mistakes a briefly
+    # locked, already-uninstalled folder for an installed copy.
+    try {
+        if (Test-Path -LiteralPath $MarkerPath -PathType Leaf) {
+            Remove-Item -LiteralPath $MarkerPath -Force -ErrorAction Stop
+            Add-Step 'Removed the Evora installation marker'
+        }
+    } catch { Add-Step 'Remove the Evora installation marker' $false }
+
     # The running uninstaller itself holds handles on this folder.  The small
     # helper waits for this exact native-host process to exit, then removes all
     # program files, including models and virtual environment.
     try {
         $escapedRoot = $Root.Replace("'", "''")
-        $cleanup = "Wait-Process -Id $PID; Remove-Item -LiteralPath '$escapedRoot' -Recurse -Force -ErrorAction SilentlyContinue"
+        $cleanup = "Wait-Process -Id $PID; for (`$attempt = 0; `$attempt -lt 30; `$attempt++) { if (-not (Test-Path -LiteralPath '$escapedRoot')) { break }; try { Remove-Item -LiteralPath '$escapedRoot' -Recurse -Force -ErrorAction Stop } catch { }; Start-Sleep -Seconds 1 }"
         $cleanupArguments = ConvertTo-EvoraArgumentString @('-NoProfile', '-WindowStyle', 'Hidden', '-Command', $cleanup)
         Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -WorkingDirectory ([Environment]::GetFolderPath('Windows')) -ArgumentList $cleanupArguments | Out-Null
         Add-Step 'Finalizing Evora program files and downloaded models'
