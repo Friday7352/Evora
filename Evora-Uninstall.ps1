@@ -177,6 +177,14 @@ function Invoke-EvoraRemoval {
 
     try {
         $python = Join-Path $Root '.venv\Scripts\python.exe'
+        Get-NetFirewallRule -DisplayName 'Evora private-network access' -ErrorAction SilentlyContinue | ForEach-Object {
+            $rule = $_
+            $port = Get-NetFirewallPortFilter -AssociatedNetFirewallRule $rule -ErrorAction SilentlyContinue
+            if ($rule.Group -eq 'Evora' -and $rule.Direction -eq 'Inbound' -and $rule.Action -eq 'Allow' -and $port.LocalPort -contains '9000') {
+                $rule | Remove-NetFirewallRule -ErrorAction Stop
+                Add-Step 'Removed Evora private-network access'
+            }
+        }
         Get-NetFirewallRule -DisplayName $RuleName -ErrorAction SilentlyContinue | ForEach-Object {
             $rule = $_
             $application = Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $rule -ErrorAction SilentlyContinue

@@ -54,15 +54,20 @@ function Get-EvoraRequestedAction {
 }
 
 function Get-EvoraFirewallRules {
-    $python = Join-Path $Root '.venv\Scripts\python.exe'
-    return @(Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue | Where-Object {
-        $application = Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $_ -ErrorAction SilentlyContinue
-        $application -and $application.Program -and $application.Program.Equals($python, [StringComparison]::OrdinalIgnoreCase)
+    return @(Get-NetFirewallRule -DisplayName 'Evora private-network access' -ErrorAction SilentlyContinue | Where-Object {
+        $_.Group -eq 'Evora'
     })
 }
 
 function Remove-EvoraFirewallRule {
     Get-EvoraFirewallRules | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    $python = Join-Path $Root '.venv\Scripts\python.exe'
+    Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue | ForEach-Object {
+        $application = Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $_ -ErrorAction SilentlyContinue
+        if ($application -and $application.Program -and $application.Program.Equals($python, [StringComparison]::OrdinalIgnoreCase)) {
+            $_ | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function ConvertTo-EvoraArgumentString([string[]] $Arguments) {
@@ -86,16 +91,16 @@ function Invoke-EvoraFirewallCommand([string[]] $Arguments) {
 }
 
 function Enable-EvoraNetworkAccess {
-    $python = Join-Path $Root '.venv\Scripts\python.exe'
-    if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { return $false }
     try {
-        [void](Invoke-EvoraFirewallCommand @('advfirewall', 'firewall', 'delete', 'rule', 'name=Whisper transcription service', ('program=' + $python)))
-        $added = Invoke-EvoraFirewallCommand @(
-            'advfirewall', 'firewall', 'add', 'rule', 'name=Whisper transcription service',
-            'dir=in', 'action=allow', ('program=' + $python), 'profile=private',
-            'remoteip=localsubnet', 'protocol=TCP', 'localport=9000'
-        )
-        return $added -and @(Get-EvoraFirewallRules).Count -gt 0
+        # A port-scoped rule is deliberately used here: Windows can host the
+        # scheduled Python process under a child executable that fails a
+        # program-scoped rule even though Evora is listening normally.
+        # The group tag lets uninstall identify only the rule Evora created.
+        Remove-EvoraFirewallRule
+        New-NetFirewallRule -DisplayName 'Evora private-network access' -Group 'Evora' `
+            -Direction Inbound -Action Allow -Protocol TCP -LocalPort 9000 `
+            -Profile Private -RemoteAddress LocalSubnet | Out-Null
+        return @(Get-EvoraFirewallRules).Count -gt 0
     } catch { return $false }
 }
 
@@ -469,7 +474,7 @@ $networkAction.Add_Click({
     $networkAction.Enabled = $false
     $networkAction.Text = 'Opening...'
     [System.Windows.Forms.Application]::DoEvents()
-    if (Enable-EvoraNetworkAccess) {
+    if (Invoke-EvoraLauncherAction '-EnableLan') {
         $script:portOpen = $true
         $script:lanAddress = Get-EvoraLanIp
         if ($script:lanAddress) { $lanUrl.Text = ('http://{0}:9000' -f $script:lanAddress) }

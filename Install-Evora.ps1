@@ -242,26 +242,30 @@ function Restore-EvoraReinstallCache([string] $Target, [switch] $SkipPythonEnvir
 }
 
 function Add-WhisperFirewallRule([string] $Target) {
-    $python = Join-Path $Target '.venv\Scripts\python.exe'
     Remove-WhisperFirewallRule $Target
-    New-NetFirewallRule -DisplayName 'Whisper transcription service' -Direction Inbound -Action Allow `
-        -Protocol TCP -LocalPort 9000 -Program $python -Profile Private -RemoteAddress LocalSubnet | Out-Null
+    # The scheduled service can be hosted by a Python child process that Windows
+    # does not consistently match against a program-scoped rule.  Scope this to
+    # Evora's TCP port and the private local subnet instead.
+    New-NetFirewallRule -DisplayName 'Evora private-network access' -Group 'Evora' `
+        -Direction Inbound -Action Allow -Protocol TCP -LocalPort 9000 `
+        -Profile Private -RemoteAddress LocalSubnet | Out-Null
     if (-not (Test-WhisperFirewallRule $Target)) {
         throw 'Windows could not verify Evora private-network access.'
     }
 }
 
 function Test-WhisperFirewallRule([string] $Target) {
-    $python = Join-Path $Target '.venv\Scripts\python.exe'
-    return $null -ne (Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue | Where-Object {
-        $application = Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $_ -ErrorAction SilentlyContinue
-        $application -and $application.Program -and $application.Program.Equals($python, [StringComparison]::OrdinalIgnoreCase)
+    return $null -ne (Get-NetFirewallRule -DisplayName 'Evora private-network access' -ErrorAction SilentlyContinue | Where-Object {
+        $_.Group -eq 'Evora'
     } | Select-Object -First 1)
 }
 
 function Remove-WhisperFirewallRule([string] $Target) {
-    # Remove only Evora's own private-network rule.  This avoids touching a
-    # similarly named rule that a user or another application may have made.
+    # Remove Evora's current port-scoped rule and the old program-scoped rule.
+    # Neither cleanup path touches a rule made manually by the user.
+    Get-NetFirewallRule -DisplayName 'Evora private-network access' -ErrorAction SilentlyContinue | Where-Object {
+        $_.Group -eq 'Evora'
+    } | Remove-NetFirewallRule -ErrorAction SilentlyContinue
     $python = Join-Path $Target '.venv\Scripts\python.exe'
     Get-NetFirewallRule -DisplayName 'Whisper transcription service' -ErrorAction SilentlyContinue | ForEach-Object {
         $rule = $_
