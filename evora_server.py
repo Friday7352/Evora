@@ -56,7 +56,7 @@ def register_cuda_dlls():
 
 register_cuda_dlls()
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 
 try:
     from faster_whisper import WhisperModel  # type: ignore
@@ -771,6 +771,15 @@ print(f"  Ready in {time.perf_counter() - _load_start:.1f}s")
 app = Flask(__name__)
 
 
+@app.route("/evora-icon.png")
+def evora_icon():
+    return send_file(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "Evora.png"),
+        mimetype="image/png",
+        max_age=86400,
+    )
+
+
 def get_lan_address():
     """Return this PC's preferred private-network IPv4 address, if known."""
     probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -814,11 +823,8 @@ def status_page():
     }}
     main {{ width: min(760px, calc(100% - 32px)); padding: 38px 0; }}
     .brand {{ display: flex; align-items: center; gap: 16px; margin: 0 8px 28px; }}
-    .mark {{
-      width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center;
-      font-weight: 800; font-size: 25px; color: white; background: linear-gradient(135deg, #c05cff, #7836e9);
-      box-shadow: 0 12px 30px #7c3aed55, inset 0 1px #ffffff55;
-    }}
+    .mark {{ width: 52px; height: 52px; border-radius: 16px; overflow: hidden; box-shadow: 0 12px 30px #7c3aed55; }}
+    .mark img {{ display: block; width: 100%; height: 100%; object-fit: cover; }}
     h1 {{ font-size: 30px; line-height: 1; margin: 0 0 7px; letter-spacing: -0.7px; }}
     .subtitle {{ color: #b8acce; font-size: 14px; }}
     .card {{ background: #151a25; border: 1px solid #242b39; border-radius: 17px; padding: 25px; box-shadow: 0 18px 46px #00000033; }}
@@ -843,7 +849,7 @@ def status_page():
 <body>
   <main>
     <header class="brand">
-      <div class="mark">E</div>
+      <div class="mark"><img src="/evora-icon.png" alt="Evora"></div>
       <div><h1>Evora</h1><div class="subtitle">Local transcription service for Frivo</div></div>
     </header>
     <section class="card">
