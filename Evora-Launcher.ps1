@@ -16,6 +16,7 @@ $SettingsPath = Join-Path $SettingsDirectory 'launcher.json'
 $script:launcherSettings = @{ CloseAction = 'keep' }
 $script:loadingSettings = $false
 $script:serviceRunning = $false
+$script:startRequestedUntil = [DateTime]::MinValue
 
 function Read-EvoraLauncherSettings {
     if (-not (Test-Path -LiteralPath $SettingsPath)) { return }
@@ -197,9 +198,9 @@ $btnPower = New-FrivoButton -Theme $Theme -Parent $viewMain -Text 'Stop Evora' -
 $btnBack = New-FrivoButton -Theme $Theme -Parent $viewSettings -Text 'Back' -X 24 -Y 4 -W 90 -H 32
 [void](New-FrivoLabel -Theme $Theme -Parent $viewSettings -Text 'WHEN I CLOSE THIS WINDOW' -X 30 -Y 42 -W 380 -H 16 -Font $Theme.FontCaps -Color $Theme.Faint)
 $closeCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 24 -Y 62 -W 422 -H 84
-$keepInTray = New-FrivoRadio -Theme $Theme -Parent $closeCard -Text 'Keep Evora running in the background' -X 18 -Y 7 -W 386 -Checked $true
-[void](New-FrivoLabel -Theme $Theme -Parent $closeCard -Text 'Minimizes Evora to the notification area.' -X 38 -Y 28 -W 350 -H 16 -Font $Theme.FontSmall -Color $Theme.Dim)
-$stopOnClose = New-FrivoRadio -Theme $Theme -Parent $closeCard -Text 'Stop Evora' -X 18 -Y 47 -W 386
+$keepInTray = New-FrivoRadio -Theme $Theme -Parent $closeCard -Text 'Minimize to the system tray when window is closed' -X 18 -Y 7 -W 386 -Checked $true
+[void](New-FrivoLabel -Theme $Theme -Parent $closeCard -Text 'Keeps the local transcription service running.' -X 38 -Y 28 -W 350 -H 16 -Font $Theme.FontSmall -Color $Theme.Dim)
+$stopOnClose = New-FrivoRadio -Theme $Theme -Parent $closeCard -Text 'Stop Evora when window is closed' -X 18 -Y 47 -W 386
 [void](New-FrivoLabel -Theme $Theme -Parent $closeCard -Text 'Stops the local transcription service and closes Evora.' -X 38 -Y 66 -W 360 -H 14 -Font $Theme.FontSmall -Color $Theme.Dim)
 [void](New-FrivoLabel -Theme $Theme -Parent $viewSettings -Text 'STARTUP' -X 30 -Y 156 -W 380 -H 16 -Font $Theme.FontCaps -Color $Theme.Faint)
 $startupCard = New-FrivoCard -Theme $Theme -Parent $viewSettings -X 24 -Y 174 -W 422 -H 62
@@ -246,7 +247,7 @@ function Test-EvoraServerUp {
     $client = New-Object System.Net.Sockets.TcpClient
     try {
         $async = $client.BeginConnect('127.0.0.1', 9000, $null, $null)
-        if (-not $async.AsyncWaitHandle.WaitOne(400)) { return $false }
+        if (-not $async.AsyncWaitHandle.WaitOne(100)) { return $false }
         $client.EndConnect($async)
         return $true
     } catch {
@@ -298,6 +299,8 @@ function Update-EvoraStatus {
     try { $taskState = (Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop).State.ToString() } catch { }
     $serverUp = ($taskState -eq 'Running') -and (Test-EvoraServerUp)
     $script:serviceRunning = ($taskState -eq 'Running')
+    if ($script:serviceRunning) { $script:startRequestedUntil = [DateTime]::MinValue }
+    $startPending = [DateTime]::Now -lt $script:startRequestedUntil
     if ($serverUp -and [DateTime]::Now -ge $script:nextHealthCheck) {
         # Model information changes only during startup or a model change, so
         # refresh it occasionally rather than blocking every five seconds.
@@ -329,13 +332,14 @@ function Update-EvoraStatus {
         $btnPower.Text = 'Stop Evora'; $btnPower.Enabled = $true
     } else {
         $dot.BackColor = if ($taskState -eq 'Running') { $Theme.Warn } else { $Theme.Faint }
-        $status.Text = if ($taskState -eq 'Running') { 'Starting...' } else { 'Stopped' }
+        $status.Text = if ($taskState -eq 'Running' -or $startPending) { 'Starting...' } else { 'Stopped' }
         $modelSummary.Text = 'Not running'
         $deviceSummary.Text = 'Not running'
         $activeModel.Text = 'Not running'
         $activeDevice.Text = 'Not running'
-        $note.Text = if ($taskState -eq 'Running') { 'The first model download can take several minutes.' } else { 'Evora can start automatically with Windows.' }
-        $btnOpen.Text = 'Start Evora'; $btnOpen.Enabled = ($taskState -ne 'Running')
+        $note.Text = if ($taskState -eq 'Running' -or $startPending) { 'The first model download can take several minutes.' } else { 'Evora can start automatically with Windows.' }
+        $btnOpen.Text = if ($taskState -eq 'Running' -or $startPending) { 'Starting Evora...' } else { 'Start Evora' }
+        $btnOpen.Enabled = ($taskState -ne 'Running') -and -not $startPending
         $btnPower.Text = 'Stop Evora'; $btnPower.Enabled = ($taskState -eq 'Running')
     }
 }
@@ -344,11 +348,8 @@ $copy.Add_Click({ try { [System.Windows.Forms.Clipboard]::SetText($localUrl.Text
 $lanCopy.Add_Click({ try { [System.Windows.Forms.Clipboard]::SetText($lanUrl.Text); $lanCopy.Text = 'Copied' } catch { } })
 $btnOpen.Add_Click({
     if ($btnOpen.Text -eq 'Start Evora') {
-        $btnOpen.Enabled = $false
-        $btnOpen.Text = 'Starting Evora...'
-        [System.Windows.Forms.Application]::DoEvents()
-        $startProcess = Start-Process -FilePath 'powershell.exe' -Verb RunAs -PassThru -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-Start')
-        $startProcess.WaitForExit()
+        $script:startRequestedUntil = [DateTime]::Now.AddSeconds(15)
+        Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-Start')
     } else { Start-Process $localUrl.Text }
     Update-EvoraStatus
 })
