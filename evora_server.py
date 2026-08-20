@@ -781,40 +781,75 @@ app = Flask(__name__)
 
 @app.route("/")
 def status_page():
-    """
-    A human-readable status page.
-
-    Only exists because the obvious thing to do when checking whether a
-    service is up is to open its address in a browser — and being met with a
-    bare "Not Found" makes a perfectly healthy server look broken.
-    """
     gpu = DEVICE == "cuda"
+    device_label = "GPU (CUDA)" if gpu else "CPU"
+    model_label = MODEL_NAME[:1].upper() + MODEL_NAME[1:]
+    address = f"http://{request.host}"
     return f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Whisper server</title></head>
-<body style="font-family:system-ui,sans-serif;background:#16171c;color:#e6e2d8;
-             padding:32px;line-height:1.7">
-  <h1 style="font-size:20px;margin:0 0 4px">Whisper transcription server</h1>
-  <p style="color:#8b8778;margin:0 0 24px">Running and ready to accept audio.</p>
-
-  <table style="border-collapse:collapse;font-family:ui-monospace,monospace;font-size:14px">
-    <tr><td style="padding:4px 24px 4px 0;color:#8b8778">Model</td><td>{MODEL_NAME}</td></tr>
-    <tr><td style="padding:4px 24px 4px 0;color:#8b8778">Device</td>
-        <td style="color:{'#e2a13f' if gpu else '#e6e2d8'}">{DEVICE}
-        {'' if gpu else '&nbsp;&nbsp;(GPU not in use)'}</td></tr>
-    <tr><td style="padding:4px 24px 4px 0;color:#8b8778">Precision</td><td>{COMPUTE_TYPE}</td></tr>
-    <tr><td style="padding:4px 24px 4px 0;color:#8b8778">Reason</td>
-        <td style="color:#8b8778">{DEVICE_REASON}</td></tr>
-  </table>
-
-  <p style="margin-top:28px;color:#8b8778">
-    Point Voice Console at
-    <code style="color:#e2a13f">http://{request.host}</code>
-    under Settings &rarr; Providers &rarr; Transcription.
-  </p>
-  <p style="color:#8b8778;font-size:13px">
-    Endpoints: <code>/health</code> &middot; <code>/v1/audio/transcriptions</code>
-  </p>
-</body></html>"""
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="20">
+  <title>Evora</title>
+  <style>
+    :root {{ color-scheme: dark; }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      font-family: "Segoe UI", system-ui, sans-serif; color: #f8f7ff;
+      background: radial-gradient(circle at 18% 0%, #44206f 0, transparent 34%),
+                  radial-gradient(circle at 90% 100%, #25114a 0, transparent 40%), #090b13;
+    }}
+    main {{ width: min(760px, calc(100% - 32px)); padding: 38px 0; }}
+    .brand {{ display: flex; align-items: center; gap: 16px; margin: 0 8px 28px; }}
+    .mark {{
+      width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center;
+      font-weight: 800; font-size: 25px; color: white; background: linear-gradient(135deg, #c05cff, #7836e9);
+      box-shadow: 0 12px 30px #7c3aed55, inset 0 1px #ffffff55;
+    }}
+    h1 {{ font-size: 30px; line-height: 1; margin: 0 0 7px; letter-spacing: -0.7px; }}
+    .subtitle {{ color: #b8acce; font-size: 14px; }}
+    .card {{ background: #151a25; border: 1px solid #242b39; border-radius: 17px; padding: 25px; box-shadow: 0 18px 46px #00000033; }}
+    .status {{ display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; }}
+    .dot {{ width: 10px; height: 10px; border-radius: 50%; background: #4ee69a; box-shadow: 0 0 13px #4ee69aaa; }}
+    .status-note {{ margin: 7px 0 0 20px; color: #b8acce; font-size: 14px; }}
+    .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }}
+    .stat {{ background: #0f131d; border: 1px solid #222a38; border-radius: 12px; padding: 16px; }}
+    .label {{ color: #9185aa; font-size: 11px; font-weight: 700; letter-spacing: .7px; }}
+    .value {{ margin-top: 7px; font-size: 18px; font-weight: 650; }}
+    .gpu {{ color: #d4a7ff; }}
+    .connection {{ margin-top: 16px; padding: 17px; border-radius: 12px; background: #201733; border: 1px solid #44305f; }}
+    .connection .label {{ color: #cab7e5; }}
+    code {{ display: block; margin-top: 7px; color: #fff; font: 600 16px ui-monospace, "Cascadia Code", Consolas, monospace; overflow-wrap: anywhere; }}
+    .detail {{ margin: 16px 2px 0; color: #a89bbd; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }}
+    footer {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 17px 8px 0; color: #8e839d; font-size: 12px; }}
+    footer span {{ padding: 5px 9px; border: 1px solid #242b39; border-radius: 7px; background: #11151e; font-family: ui-monospace, monospace; }}
+    @media (max-width: 520px) {{ main {{ padding: 24px 0; }} .grid {{ grid-template-columns: 1fr; }} .card {{ padding: 20px; }} }}
+  </style>
+</head>
+<body>
+  <main>
+    <header class="brand">
+      <div class="mark">E</div>
+      <div><h1>Evora</h1><div class="subtitle">Local transcription service for Frivo</div></div>
+    </header>
+    <section class="card">
+      <div class="status"><span class="dot"></span>Running</div>
+      <p class="status-note">Evora is ready to accept private, local audio transcription.</p>
+      <div class="grid">
+        <div class="stat"><div class="label">ACTIVE MODEL</div><div class="value">{model_label}</div></div>
+        <div class="stat"><div class="label">PROCESSING</div><div class="value {'gpu' if gpu else ''}">{device_label}</div></div>
+        <div class="stat"><div class="label">PRECISION</div><div class="value">{COMPUTE_TYPE}</div></div>
+        <div class="stat"><div class="label">SPEAKER LABELLING</div><div class="value">{'Available' if SPEAKER_ENABLED else 'Not available'}</div></div>
+      </div>
+      <div class="connection"><div class="label">USE THIS ADDRESS IN FRIVO</div><code>{address}</code></div>
+      <p class="detail">{DEVICE_REASON}</p>
+    </section>
+    <footer><span>GET /health</span><span>POST /v1/audio/transcriptions</span><span>Refreshes every 20 seconds</span></footer>
+  </main>
+</body>
+</html>"""
 
 
 @app.route("/health")
