@@ -7,7 +7,8 @@ ecapa_model/
 venv/
 __pycache__/
 *.py[cod]
-build/
+build/*.exe
+build/*.pdb
 dist/
 
 # Logs and temporary files

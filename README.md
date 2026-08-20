@@ -6,8 +6,12 @@ can stay on your computer or LAN rather than being sent to a cloud service.
 
 ## Install on Windows
 
-Double-click **Evora-Setup.vbs**. It opens the Evora setup window without a
-Command Prompt window. The
+Download **EvoraSetup.exe** from the latest GitHub release and run it. It
+opens the Evora setup window without a Command Prompt window. If you are
+building from source, run `build\Build-EvoraInstaller.ps1` to create the same
+single-file installer in `dist\EvoraSetup.exe`.
+
+The
 setup window installs an isolated **Python 3.11** environment, the required
 Evora and speaker-labelling packages, a private-network firewall rule, and
 a Windows startup task. It replaces the former Python 3.14 path, which is not
