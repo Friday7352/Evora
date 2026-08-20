@@ -48,3 +48,16 @@ Source: "..\requirements.txt";        DestDir: "{tmp}\EvoraSetupPayload"; Flags:
 
 [Run]
 Filename: "{tmp}\EvoraSetupPayload\EvoraSetupHost.exe"; Parameters: "--script ""{tmp}\EvoraSetupPayload\Evora-Setup.ps1"""; Flags: waituntilterminated hidewizard 64bit
+
+[Code]
+function PostMessage(hWnd: HWND; Msg, wParam, lParam: Longint): Boolean;
+  external 'PostMessageW@user32.dll stdcall';
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = wpReady then
+  begin
+    WizardForm.Hide;
+    PostMessage(WizardForm.NextButton.Handle, $00F5, 0, 0);
+  end;
+end;
