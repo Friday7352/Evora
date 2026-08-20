@@ -404,11 +404,14 @@ $trayShow = $trayMenu.Items.Add('Show Evora')
 [void] $trayMenu.Items.Add('-')
 $trayQuit = $trayMenu.Items.Add('Stop Evora and quit')
 $notify.ContextMenuStrip = $trayMenu
-$notify.Visible = $true
+$notify.Visible = $false
 $script:quitting = $false
 $script:trayNoticeShown = $false
+$script:trayMode = $false
 
 function Show-EvoraLauncher {
+    $script:trayMode = $false
+    $notify.Visible = $false
     $form.ShowInTaskbar = $true
     $form.Show()
     if ($form.WindowState -eq [System.Windows.Forms.FormWindowState]::Minimized) { $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal }
@@ -429,6 +432,12 @@ $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 1200
 $timer.Add_Tick({
     Update-EvoraStatus
+    if ($script:trayMode -and -not $script:serviceRunning) {
+        # A stopped service does not leave an orphaned launcher in the tray.
+        $script:quitting = $true
+        $form.Close()
+        return
+    }
     if ($copy.Text -eq 'Copied') { $copy.Text = 'Copy' }
     if ($lanCopy.Text -eq 'Copied') { $lanCopy.Text = 'Copy' }
     if ($showSignal.WaitOne(0)) {
@@ -440,14 +449,10 @@ $timer.Start()
 $form.Add_FormClosing({
     param($sender, $eventArgs)
     if ($script:quitting -or $eventArgs.CloseReason -ne [System.Windows.Forms.CloseReason]::UserClosing) { return }
-    # The user's close preference controls the launcher itself.  Do not make
-    # it depend on a momentary service-status probe: Evora can be starting,
-    # stopped, or temporarily unreachable and should still remain available
-    # from the tray when "Keep Evora running" is selected.
-    if ($script:launcherSettings.CloseAction -eq 'keep') {
+    if ($script:launcherSettings.CloseAction -eq 'keep' -and $script:serviceRunning) {
         $eventArgs.Cancel = $true
-        # Keep the same form/message loop alive, just as Frivo does.  This is
-        # what keeps the notification-area icon and its menu registered.
+        $script:trayMode = $true
+        $notify.Visible = $true
         $form.Hide()
         if (-not $script:trayNoticeShown) {
             $script:trayNoticeShown = $true
