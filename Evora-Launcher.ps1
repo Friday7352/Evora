@@ -270,8 +270,20 @@ function Test-EvoraLocalName {
 
 $script:health = $null
 $script:nextHealthCheck = [DateTime]::MinValue
+$script:nextNetworkCheck = [DateTime]::MaxValue
+$script:localAddress = 'http://localhost:9000'
+$script:lanAddress = $null
+$script:portOpen = $false
+$script:mainLanVisible = $null
+$script:settingsPortOpen = $null
+$script:nextStatusPoll = [DateTime]::MinValue
+$script:deferStatusPollUntil = [DateTime]::MinValue
+$script:startupEnabled = $true
+$script:nextStartupCheck = [DateTime]::MaxValue
 
 function Set-EvoraMainNetworkState([bool] $ShowLan) {
+    if ($script:mainLanVisible -eq $ShowLan) { return }
+    $script:mainLanVisible = $ShowLan
     $lanCard.Visible = $ShowLan
     $y = if ($ShowLan) { 196 } else { 108 }
     $modelCard.Location = [System.Drawing.Point]::new(24, $y)
@@ -284,6 +296,8 @@ function Set-EvoraMainNetworkState([bool] $ShowLan) {
 }
 
 function Set-EvoraSettingsNetworkState([bool] $PortOpen) {
+    if ($script:settingsPortOpen -eq $PortOpen) { return }
+    $script:settingsPortOpen = $PortOpen
     $networkHeading.Visible = -not $PortOpen
     $networkCard.Visible = -not $PortOpen
     $offset = if ($PortOpen) { -92 } else { 0 }
@@ -295,10 +309,8 @@ function Set-EvoraSettingsNetworkState([bool] $PortOpen) {
 }
 
 function Update-EvoraStatus {
-    $taskState = 'Not registered'
-    try { $taskState = (Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop).State.ToString() } catch { }
-    $serverUp = ($taskState -eq 'Running') -and (Test-EvoraServerUp)
-    $script:serviceRunning = ($taskState -eq 'Running')
+    $serverUp = Test-EvoraServerUp
+    $script:serviceRunning = $serverUp
     if ($script:serviceRunning) { $script:startRequestedUntil = [DateTime]::MinValue }
     $startPending = [DateTime]::Now -lt $script:startRequestedUntil
     if ($serverUp -and [DateTime]::Now -ge $script:nextHealthCheck) {
@@ -309,10 +321,10 @@ function Update-EvoraStatus {
     }
     if (-not $serverUp) { $script:health = $null; $script:nextHealthCheck = [DateTime]::MinValue }
     $health = $script:health
-    $localAddress = if (Test-EvoraLocalName) { 'http://evora.local:9000' } else { 'http://localhost:9000' }
+    $localAddress = $script:localAddress
     $localUrl.Text = $localAddress
-    $lanAddress = Get-EvoraLanIp
-    $portOpen = Test-EvoraNetworkEnabled
+    $lanAddress = $script:lanAddress
+    $portOpen = $script:portOpen
     $showLan = $portOpen -and -not [string]::IsNullOrWhiteSpace($lanAddress)
     if ($showLan) { $lanUrl.Text = ('http://{0}:9000' -f $lanAddress) }
     Set-EvoraMainNetworkState $showLan
@@ -331,16 +343,16 @@ function Update-EvoraStatus {
         $btnOpen.Text = 'Open service status'; $btnOpen.Enabled = $true
         $btnPower.Text = 'Stop Evora'; $btnPower.Enabled = $true
     } else {
-        $dot.BackColor = if ($taskState -eq 'Running') { $Theme.Warn } else { $Theme.Faint }
-        $status.Text = if ($taskState -eq 'Running' -or $startPending) { 'Starting...' } else { 'Stopped' }
+        $dot.BackColor = if ($startPending) { $Theme.Warn } else { $Theme.Faint }
+        $status.Text = if ($startPending) { 'Starting...' } else { 'Stopped' }
         $modelSummary.Text = 'Not running'
         $deviceSummary.Text = 'Not running'
         $activeModel.Text = 'Not running'
         $activeDevice.Text = 'Not running'
-        $note.Text = if ($taskState -eq 'Running' -or $startPending) { 'The first model download can take several minutes.' } else { 'Evora can start automatically with Windows.' }
-        $btnOpen.Text = if ($taskState -eq 'Running' -or $startPending) { 'Starting Evora...' } else { 'Start Evora' }
-        $btnOpen.Enabled = ($taskState -ne 'Running') -and -not $startPending
-        $btnPower.Text = 'Stop Evora'; $btnPower.Enabled = ($taskState -eq 'Running')
+        $note.Text = if ($startPending) { 'The first model download can take several minutes.' } else { 'Evora can start automatically with Windows.' }
+        $btnOpen.Text = if ($startPending) { 'Starting Evora...' } else { 'Start Evora' }
+        $btnOpen.Enabled = -not $startPending
+        $btnPower.Text = 'Stop Evora'; $btnPower.Enabled = $false
     }
 }
 
@@ -349,16 +361,22 @@ $lanCopy.Add_Click({ try { [System.Windows.Forms.Clipboard]::SetText($lanUrl.Tex
 $btnOpen.Add_Click({
     if ($btnOpen.Text -eq 'Start Evora') {
         $script:startRequestedUntil = [DateTime]::Now.AddSeconds(15)
+        $status.Text = 'Starting...'; $dot.BackColor = $Theme.Warn
+        $btnOpen.Text = 'Starting Evora...'; $btnOpen.Enabled = $false
         Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-Start')
+        $script:nextStatusPoll = [DateTime]::MinValue
     } else { Start-Process $localUrl.Text }
-    Update-EvoraStatus
 })
-$btnPower.Add_Click({ Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-Stop'); Update-EvoraStatus })
+$btnPower.Add_Click({
+    $status.Text = 'Stopping...'; $btnPower.Enabled = $false
+    Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-Stop')
+    $script:nextStatusPoll = [DateTime]::MinValue
+})
 $btnSettings.Add_Click({
     $script:loadingSettings = $true
     $keepInTray.Checked = ($script:launcherSettings.CloseAction -eq 'keep')
     $stopOnClose.Checked = ($script:launcherSettings.CloseAction -eq 'stop')
-    $startupCheck.Checked = Test-EvoraStartupEnabled
+    $startupCheck.Checked = $script:startupEnabled
     $script:loadingSettings = $false
     $viewMain.Visible = $false; $viewSettings.Visible = $true
 })
@@ -381,10 +399,9 @@ $startupCheck.Add_CheckedChanged({
 $networkAction.Add_Click({
     $networkAction.Enabled = $false
     $networkAction.Text = 'Opening...'
-    [System.Windows.Forms.Application]::DoEvents()
-    Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-EnableLan') | Out-Null
-    $networkAction.Text = 'Open port 9000'
-    Update-EvoraStatus
+    Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $PSCommandPath), '-EnableLan')
+    $script:nextNetworkCheck = [DateTime]::MinValue
+    $script:nextStatusPoll = [DateTime]::MinValue
 })
 $btnLog.Add_Click({ $log = Join-Path $Root 'whisper_service.log'; if (Test-Path -LiteralPath $log) { Start-Process notepad.exe -ArgumentList ('"{0}"' -f $log) } })
 $btnFolder.Add_Click({ Start-Process explorer.exe -ArgumentList ('"{0}"' -f $Root) })
@@ -429,11 +446,19 @@ $trayShow.Add_Click({ Show-EvoraLauncher })
 $trayQuit.Add_Click({ Stop-EvoraAndQuit })
 $notify.Add_DoubleClick({ Show-EvoraLauncher })
 
+$form.Add_LocationChanged({
+    $script:deferStatusPollUntil = [DateTime]::Now.AddMilliseconds(450)
+})
+
 $timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 1200
+$timer.Interval = 400
 $timer.Add_Tick({
-    Update-EvoraStatus
-    if ($script:trayMode -and -not $script:serviceRunning) {
+    $now = [DateTime]::Now
+    if ($now -ge $script:nextStatusPoll -and $now -ge $script:deferStatusPollUntil) {
+        Update-EvoraStatus
+        $script:nextStatusPoll = $now.AddSeconds(3)
+    }
+    if ($script:trayMode -and -not $script:serviceRunning -and [DateTime]::Now -ge $script:startRequestedUntil) {
         # A stopped service does not leave an orphaned launcher in the tray.
         $script:quitting = $true
         $form.Close()
@@ -450,7 +475,7 @@ $timer.Start()
 $form.Add_FormClosing({
     param($sender, $eventArgs)
     if ($script:quitting -or $eventArgs.CloseReason -ne [System.Windows.Forms.CloseReason]::UserClosing) { return }
-    if ($script:launcherSettings.CloseAction -eq 'keep' -and $script:serviceRunning) {
+    if ($script:launcherSettings.CloseAction -eq 'keep' -and ($script:serviceRunning -or [DateTime]::Now -lt $script:startRequestedUntil)) {
         $eventArgs.Cancel = $true
         $script:trayMode = $true
         $notify.Visible = $true
@@ -468,6 +493,12 @@ $form.Add_FormClosed({
     $timer.Stop(); $timer.Dispose(); $notify.Visible = $false; $notify.Dispose()
 })
 Update-EvoraStatus
+$script:startupEnabled = Test-EvoraStartupEnabled
+$script:localAddress = if (Test-EvoraLocalName) { 'http://evora.local:9000' } else { 'http://localhost:9000' }
+$script:lanAddress = Get-EvoraLanIp
+$script:portOpen = Test-EvoraNetworkEnabled
+Set-EvoraMainNetworkState ($script:portOpen -and -not [string]::IsNullOrWhiteSpace($script:lanAddress))
+Set-EvoraSettingsNetworkState $script:portOpen
 # Frivo uses Application.Run, not ShowDialog.  Hiding a modal dialog ends its
 # modal loop, which made Evora's native host exit and take the tray icon with
 # it.  A normal application loop continues after the form is hidden.
