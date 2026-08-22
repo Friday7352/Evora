@@ -448,6 +448,26 @@ function Uninstall-Whisper([string] $Target) {
     Write-SetupLog 'Whisper uninstall completed.'
 }
 
+function Update-ShellIconCache {
+    <#
+        Windows caches shortcut icons by path. Replacing an .ico with new
+        artwork at the same path therefore changes nothing on screen — the
+        desktop keeps drawing the old picture, sometimes for weeks, and it
+        reads as "the new icon did not install".
+
+        ie4uinit rebuilds that cache. Best effort by design: a stale icon is
+        a cosmetic problem and must never fail an install.
+    #>
+    try {
+        $ie4uinit = Join-Path ([Environment]::GetFolderPath('System')) 'ie4uinit.exe'
+        if (-not (Test-Path -LiteralPath $ie4uinit -PathType Leaf)) { return }
+        # -show on Windows 10/11; -ClearIconCache on older builds. Trying
+        # both costs nothing and the wrong one is simply ignored.
+        Start-Process -FilePath $ie4uinit -ArgumentList '-show' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+        Start-Process -FilePath $ie4uinit -ArgumentList '-ClearIconCache' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+    } catch { }
+}
+
 function New-Shortcut([string] $Target, [string] $Link, [string] $WorkingDirectory, [string] $IconPath, [string] $Arguments) {
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($Link)
@@ -511,6 +531,11 @@ function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $Al
     if ($CreateDesktopShortcut) {
         New-Shortcut -Target (Join-Path $Target 'EvoraHost.exe') -Link (Join-Path $desktop 'Evora.lnk') -WorkingDirectory $Target -IconPath (Join-Path $Target 'EvoraIcon.ico') -Arguments ('--script "{0}"' -f (Join-Path $Target 'Evora-Launcher.ps1'))
     }
+    # New artwork at an existing path stays invisible until the shell
+    # icon cache is rebuilt — which is what makes a new icon look like it
+    # never installed.
+    Update-ShellIconCache
+
     & $OnProgress 100 'Evora is ready.'
 }
 
