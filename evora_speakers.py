@@ -6,12 +6,26 @@ import os
 import threading
 import time
 import uuid
+import pickle
 from pathlib import Path
 
 import numpy as np
 
 RATE = 16000
 MODEL = "pyannote/speaker-diarization-community-1"
+
+
+def load_speaker_pipeline(cache_dir, token):
+    """Allow only the metadata types used by official pyannote checkpoints."""
+    import torch
+    from pyannote.audio import Pipeline
+    from pyannote.audio.core.task import Specifications, Problem, Resolution
+    from torch.torch_version import TorchVersion
+    # PyTorch 2.6+ defaults to weights-only loading. pyannote 4.0.1 checkpoints
+    # also carry these metadata values. Keep weights-only protection enabled;
+    # never globally disable it or allow arbitrary types named by a checkpoint.
+    with torch.serialization.safe_globals([TorchVersion, Specifications, Problem, Resolution]):
+        return Pipeline.from_pretrained(MODEL, token=token, cache_dir=str(cache_dir))
 
 
 def atomic_json(path, value):
@@ -191,9 +205,7 @@ class LocalModels:
         with self.lock:
             try:
                 import torch
-                from pyannote.audio import Pipeline
-                pipeline = Pipeline.from_pretrained(MODEL, token=self.settings["token"],
-                                                    cache_dir=str(self.root / "model_cache"))
+                pipeline = load_speaker_pipeline(self.root / "model_cache", self.settings["token"])
                 pipeline.to(torch.device(self.device))
                 self.pipeline = pipeline
                 if self.settings["recover_overlap"]:
@@ -211,8 +223,13 @@ class LocalModels:
                 self.separator = None
                 self.state = "error"
                 # Do not expose upstream errors which may contain download credentials.
-                self.error = (f"Speaker model could not load ({type(exc).__name__}). Accept the model access "
-                              "conditions, check your read token and internet connection, then save settings to retry.")
+                if isinstance(exc, pickle.UnpicklingError):
+                    self.error = ("Speaker model file could not be read (UnpicklingError). "
+                                  "This indicates model compatibility or a damaged download, not necessarily a token problem. "
+                                  "Update Evora and retry. If it persists, report this error.")
+                else:
+                    self.error = (f"Speaker model could not load ({type(exc).__name__}). Accept the model access "
+                                  "conditions, check your read token and internet connection, then save settings to retry.")
 
     def turns(self, audio):
         import torch

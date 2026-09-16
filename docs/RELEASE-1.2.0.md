@@ -1,5 +1,13 @@
 # Evora 1.2.0
 
+## 1.2.2 patch
+
+Add a scoped allowlist for official pyannote checkpoint metadata when loading
+with PyTorch's weights-only deserializer. This addresses the known
+UnpicklingError compatibility failure without disabling weights-only loading.
+Model decoding errors now distinguish compatibility or damaged files from
+access-token problems. Existing tokens and enrolled voices are retained.
+
 ## 1.2.1 patch
 
 Speaker settings, enrollment, and forgetting now work from another PC on
