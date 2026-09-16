@@ -202,7 +202,7 @@ function Copy-ProgramFiles([string] $Destination) {
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
     $keep = @(
         '.gitattributes', '.gitignore', 'LICENSE', 'README.md', 'THIRD_PARTY_NOTICES.txt', 'requirements.txt',
-        'evora_server.py', 'Install-Evora.ps1', 'Uninstall-Evora.vbs',
+        'evora_server.py', 'evora_speakers.py', 'evora_api.py', 'VERSION', 'Install-Evora.ps1', 'Uninstall-Evora.vbs',
         'Evora-Uninstall.ps1', 'Evora-Launcher.ps1', 'EvoraHost.exe', 'EvoraSetupHost.exe',
         'Evora.Ui.psm1', 'Evora-Setup.ps1', 'Evora-Setup.vbs', 'Evora.png', 'EvoraIcon.ico'
     )
@@ -211,6 +211,14 @@ function Copy-ProgramFiles([string] $Destination) {
         if (Test-Path -LiteralPath $from) {
             Copy-Item -LiteralPath $from -Destination (Join-Path $Destination $name) -Force
         }
+    }
+    $templates = Join-Path $Destination 'templates'
+    New-Item -ItemType Directory -Path $templates -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $SourceDir 'templates\speaker_settings.html') -Destination $templates -Force
+    $docs = Join-Path $Destination 'docs'
+    New-Item -ItemType Directory -Path $docs -Force | Out-Null
+    foreach ($name in @('speaker-api.md', 'RELEASE-1.1.0.md')) {
+        Copy-Item -LiteralPath (Join-Path $SourceDir ('docs\' + $name)) -Destination $docs -Force
     }
 }
 
@@ -225,14 +233,14 @@ function Restore-EvoraReinstallCache([string] $Target, [switch] $SkipPythonEnvir
     $cache = Get-EvoraReinstallCachePath
     $restored = [ordered]@{ VenvReady = $false; ModelsRestored = $false }
     if (-not (Test-Path -LiteralPath $cache -PathType Container)) { return [pscustomobject] $restored }
-    $cacheItems = if ($SkipPythonEnvironment) { @('model_cache', 'ecapa_model') } else { @('.venv', 'model_cache', 'ecapa_model') }
+    $cacheItems = if ($SkipPythonEnvironment) { @('model_cache', 'ecapa_model', 'separation_model') } else { @('.venv', 'model_cache', 'ecapa_model', 'separation_model') }
     foreach ($name in $cacheItems) {
         $saved = Join-Path $cache $name
         $destination = Join-Path $Target $name
         if ((Test-Path -LiteralPath $saved) -and -not (Test-Path -LiteralPath $destination)) {
             Move-Item -LiteralPath $saved -Destination $destination -Force
             if ($name -eq '.venv') { $restored.VenvReady = Test-Path -LiteralPath (Join-Path $destination 'Scripts\python.exe') -PathType Leaf }
-            if ($name -in @('model_cache', 'ecapa_model')) { $restored.ModelsRestored = $true }
+            if ($name -in @('model_cache', 'ecapa_model', 'separation_model')) { $restored.ModelsRestored = $true }
         }
     }
     try {
@@ -320,7 +328,7 @@ function Register-WhisperInstalledApp([string] $Target) {
     $uninstaller = Join-Path $Target 'Uninstall-Evora.vbs'
     New-Item -Path $key -Force | Out-Null
     New-ItemProperty -Path $key -Name 'DisplayName' -Value 'Evora' -PropertyType String -Force | Out-Null
-    New-ItemProperty -Path $key -Name 'DisplayVersion' -Value '1.0' -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $key -Name 'DisplayVersion' -Value ((Get-Content -LiteralPath (Join-Path $Target 'VERSION') -Raw).Trim()) -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $key -Name 'Publisher' -Value 'Friday' -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $key -Name 'InstallLocation' -Value $Target -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $key -Name 'UninstallString' -Value ('wscript.exe "{0}"' -f $uninstaller) -PropertyType String -Force | Out-Null
@@ -546,6 +554,22 @@ function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $Al
         Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--upgrade', 'pip') -WorkingDirectory $Target
         Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--no-input', '--disable-pip-version-check', '-r', 'requirements.txt') -WorkingDirectory $Target
     }
+    # Existing environments must upgrade too; never mark old dependencies current.
+    if ($reused.VenvReady -and -not (Test-EvoraEnvironmentCompatible $Target)) {
+        & $OnProgress 52 'Updating Evora speech and speaker libraries...'
+        Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--no-input', '--disable-pip-version-check', '-r', 'requirements.txt') -WorkingDirectory $Target
+    }
+    & $OnProgress 65 'Configuring GPU support for speaker recognition...'
+    $gpuAvailable = $false
+    try {
+        & $venvPython -c 'import ctranslate2; raise SystemExit(0 if ctranslate2.get_cuda_device_count() else 1)'
+        $gpuAvailable = ($LASTEXITCODE -eq 0)
+    } catch { }
+    if ($gpuAvailable) {
+        Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--no-input', 'torch==2.8.0+cu126', 'torchaudio==2.8.0+cu126', '--index-url', 'https://download.pytorch.org/whl/cu126') -WorkingDirectory $Target
+    }
+    Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'check') -WorkingDirectory $Target
+    Invoke-Checked -FilePath $venvPython -Arguments @('-c', 'import torch._dynamo; import faster_whisper, speechbrain; from pyannote.audio import Pipeline') -WorkingDirectory $Target
     # Record the environment only after it is known to match this release.
     Write-WhisperInstallMarker $Target
     & $OnProgress 78 'Configuring network access...'

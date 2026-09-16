@@ -225,7 +225,7 @@ $deviceCard = New-FrivoCard -Theme $Theme -Parent $viewMain -X 236 -Y 108 -W 210
 [void](New-FrivoLabel -Theme $Theme -Parent $deviceCard -Text 'PROCESSING' -X 18 -Y 14 -W 174 -H 14 -Font $Theme.FontCaps -Color $Theme.Faint)
 $deviceSummary = New-FrivoLabel -Theme $Theme -Parent $deviceCard -Text 'Waiting...' -X 18 -Y 38 -W 174 -H 24 -Font $Theme.FontMid -Color $Theme.Ink
 $note = New-FrivoLabel -Theme $Theme -Parent $viewMain -Text 'Evora keeps transcription private on this computer.' -X 28 -Y 202 -W 414 -H 34 -Font $Theme.FontSmall -Color $Theme.Dim
-$btnOpen = New-FrivoButton -Theme $Theme -Parent $viewMain -Text 'Open service status' -X 24 -Y 246 -W 422 -H 42 -Primary $true
+$btnOpen = New-FrivoButton -Theme $Theme -Parent $viewMain -Text 'Open status and speaker setup' -X 24 -Y 246 -W 422 -H 42 -Primary $true
 $btnSettings = New-FrivoButton -Theme $Theme -Parent $viewMain -Text 'Settings' -X 24 -Y 300 -W 205 -H 36
 $btnPower = New-FrivoButton -Theme $Theme -Parent $viewMain -Text 'Stop Evora' -X 241 -Y 300 -W 205 -H 36
 

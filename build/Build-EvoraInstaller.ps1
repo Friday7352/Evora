@@ -4,6 +4,10 @@ param()
 $ErrorActionPreference = 'Stop'
 $build = Split-Path -Parent $PSCommandPath
 $root = Split-Path -Parent $build
+$releaseVersion = (Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim()
+if ($releaseVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'VERSION must contain major.minor.patch.' }
+$versionSource = Join-Path $build 'EvoraVersion.g.cs'
+[IO.File]::WriteAllText($versionSource, ('[assembly: System.Reflection.AssemblyVersion("{0}.0")]' -f $releaseVersion) + "`r`n" + ('[assembly: System.Reflection.AssemblyFileVersion("{0}.0")]' -f $releaseVersion))
 
 function Find-InnoSetupCompiler {
     <#
@@ -167,6 +171,7 @@ function Build-EvoraHost {
         ('/reference:{0}' -f $automation),
         '/reference:System.Windows.Forms.dll',
         (Join-Path $build 'EvoraHost.cs')
+        $versionSource
     )
     if ($Manifest) { $arguments += ('/win32manifest:{0}' -f $Manifest) }
     & $compiler @arguments

@@ -9,6 +9,43 @@ Evora is an optional companion to [Frivo](https://github.com/Friday7352/Frivo).
 It provides the local OpenAI-compatible `/v1/audio/transcriptions` address
 that Frivo uses while listening.
 
+## Speaker recognition in 1.1.0
+
+Evora can now return individual speaker segments with word timestamps,
+detect overlapping voices, and remember explicitly enrolled voices. It uses
+Community-1 for diarization and ECAPA for voice matching. Unknown or ambiguous
+speech stays unassigned. Recognition accuracy is not guaranteed, especially
+with voice changers, compression, distance, or people speaking simultaneously.
+
+After updating, open **Open status and speaker setup** in the launcher, then
+**Speaker recognition settings** on the service page (on the Evora computer).
+Accept the [Community-1 model access conditions](https://huggingface.co/pyannote/speaker-diarization-community-1)
+and provide a Hugging Face read token. Save to download and prepare the models.
+This authorization is for model downloads; audio processing remains local.
+Until preparation completes, transcription works but speaker labels are unavailable.
+
+Use **Remember a voice** to enroll 3–20 seconds of one person speaking alone.
+Saved voices survive restarts and updates. Automatically discovered voices
+remain session-only and need additional clean speech before confirmation.
+The **Forget** button removes a saved voice. No raw enrollment audio is retained.
+
+GPU installations default to `large-v3-turbo` with `int8_float16` computation.
+Existing `WHISPER_MODEL` / `WHISPER_COMPUTE` overrides still take precedence.
+CPU installations keep the smaller model. The installer sets up CUDA 12.6
+PyTorch on detected NVIDIA GPUs, including the RTX 2070 Super generation.
+Available GPU memory and speed must be measured alongside other running apps.
+
+Experimental overlap recovery uses SepFormer only on detected two-person
+overlap. It is off by default to minimize delay. Recovered words remain
+uncertain and are excluded from strict speaker filtering. Three or more
+simultaneous voices are not separated by this release.
+
+Frivo's existing transcription connection remains compatible. Its current UI
+still consumes one speaker label per clip; mixed-speaker clips now return no
+single label. A future Frivo update must consume the new segments and stream
+API to display multiple speakers, use incremental results, and offer speaker
+selection. See [the API guide](docs/speaker-api.md).
+
 ![Evora launcher showing a running service, local and network addresses, active model, and GPU processing](docs/screenshots/launcher.png)
 
 ## How Evora works with Frivo
@@ -81,6 +118,12 @@ hardware use CPU transcription.
 Evora stores its runtime, downloaded models, speaker-labelling model, and
 logs on the computer where it is installed. Those generated files are not
 included in this repository. Evora does not require an API key.
+
+Speaker recognition requires the download token described above, stored in
+`speaker_settings.json` inside the installation folder. Saved voice embeddings
+and names are stored in `known_speakers.json`; they are not audio recordings.
+Pyannote usage telemetry is disabled by default. Uninstall removes these files;
+the optional download cache preserves models, not tokens or saved identities.
 
 ## Building from source
 

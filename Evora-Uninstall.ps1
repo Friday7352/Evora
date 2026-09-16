@@ -121,7 +121,7 @@ function Preserve-EvoraReinstallCache {
     $cache = Join-Path $env:ProgramData 'Evora\reinstall-cache'
     New-Item -ItemType Directory -Path $cache -Force | Out-Null
     $preserved = 0
-    foreach ($name in @('.venv', 'model_cache', 'ecapa_model')) {
+    foreach ($name in @('.venv', 'model_cache', 'ecapa_model', 'separation_model')) {
         $source = Join-Path $Root $name
         $destination = Join-Path $cache $name
         if (-not (Test-Path -LiteralPath $source)) { continue }

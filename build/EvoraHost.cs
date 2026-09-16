@@ -12,8 +12,6 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("Evora desktop host")]
 [assembly: AssemblyCompany("Friday")]
 [assembly: AssemblyProduct("Evora")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
 
 internal static class Program
 {

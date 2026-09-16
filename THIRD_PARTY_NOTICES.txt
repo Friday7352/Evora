@@ -4,6 +4,27 @@ Evora Third-Party Notices
 Evora installs and uses open-source software. The notices below are included
 with Evora for the components noted here.
 
+Speaker analysis dependencies and downloaded models
+--------------------------------------------------
+pyannote.audio: MIT, Copyright (c) 2021-2025 CNRS and 2025- pyannoteAI.
+https://github.com/pyannote/pyannote-audio
+The MIT permission and disclaimer below apply to this dependency as well.
+
+Community-1 model: CC BY 4.0, pyannote / pyannoteAI.
+https://huggingface.co/pyannote/speaker-diarization-community-1
+https://creativecommons.org/licenses/by/4.0/
+Downloaded separately after the user accepts the model access conditions.
+
+SpeechBrain: Apache License 2.0, SpeechBrain contributors.
+https://github.com/speechbrain/speechbrain
+ECAPA voice encoder and SepFormer WHAMR separation model: Apache License 2.0.
+https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb
+https://huggingface.co/speechbrain/sepformer-whamr
+https://www.apache.org/licenses/LICENSE-2.0
+Models are downloaded unmodified; Evora adds segmentation, matching, and filtering.
+PyTorch, torchaudio, and TorchCodec retain their upstream license notices in
+the installed Python packages. No model weights are embedded in EvoraSetup.exe.
+
 faster-whisper
 --------------
 Copyright (c) 2023 SYSTRAN

@@ -1,12 +1,12 @@
 #define AppName "Evora"
-#define AppVersion "1.0.0"
+#define AppVersion Trim(FileRead(FileOpen("..\VERSION")))
 #define AppPublisher "Friday"
 
 [Setup]
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
-VersionInfoVersion=1.0.0.0
+VersionInfoVersion={#AppVersion}.0
 VersionInfoCompany={#AppPublisher}
 VersionInfoDescription=Evora Setup
 OutputDir=..\dist
@@ -45,6 +45,12 @@ Source: "..\THIRD_PARTY_NOTICES.txt"; DestDir: "{tmp}\EvoraSetupPayload"; Flags:
 Source: "..\Uninstall-Evora.vbs";     DestDir: "{tmp}\EvoraSetupPayload"; Flags: ignoreversion deleteafterinstall
 Source: "..\evora_server.py";         DestDir: "{tmp}\EvoraSetupPayload"; Flags: ignoreversion deleteafterinstall
 Source: "..\requirements.txt";        DestDir: "{tmp}\EvoraSetupPayload"; Flags: ignoreversion deleteafterinstall
+Source: "..\VERSION";                 DestDir: "{tmp}\EvoraSetupPayload"; Flags: ignoreversion deleteafterinstall
+Source: "..\evora_speakers.py";        DestDir: "{tmp}\EvoraSetupPayload"; Flags: ignoreversion deleteafterinstall
+Source: "..\evora_api.py";             DestDir: "{tmp}\EvoraSetupPayload"; Flags: ignoreversion deleteafterinstall
+Source: "..\templates\speaker_settings.html"; DestDir: "{tmp}\EvoraSetupPayload\templates"; Flags: ignoreversion deleteafterinstall
+Source: "..\docs\speaker-api.md"; DestDir: "{tmp}\EvoraSetupPayload\docs"; Flags: ignoreversion deleteafterinstall
+Source: "..\docs\RELEASE-1.1.0.md"; DestDir: "{tmp}\EvoraSetupPayload\docs"; Flags: ignoreversion deleteafterinstall
 
 [Run]
 Filename: "{tmp}\EvoraSetupPayload\EvoraSetupHost.exe"; Parameters: "--script ""{tmp}\EvoraSetupPayload\Evora-Setup.ps1"""; Flags: waituntilterminated hidewizard 64bit
