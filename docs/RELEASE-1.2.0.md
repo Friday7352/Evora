@@ -1,5 +1,13 @@
 # Evora 1.2.0
 
+## 1.2.1 patch
+
+Speaker settings, enrollment, and forgetting now work from another PC on
+the trusted private network when Evora network access is enabled. Changes
+still require the settings page token. Public peer addresses and spoofed
+forwarding headers do not grant access. Saved download tokens are never
+returned, and the settings page is not cached.
+
 Saved voices can be enrolled from up to 30 seconds of clear solo speech. Enrollment keeps several samples of each voice; live conversations do not modify saved profiles.
 
 Frivo 1.3.0 creates a listening session with its own temporary speaker memory, seeded with saved voices. Random voices are learned from clean speech and keep their IDs across clips until the session ends. Short clear clips accumulate evidence before a temporary voice is confirmed.

@@ -2,6 +2,7 @@
 
 import secrets
 import time
+import ipaddress
 
 from flask import jsonify, request, render_template
 
@@ -15,8 +16,18 @@ def register_routes(app, models, registry, transcribe, decode, lock):
     analyzer = SpeakerAnalyzer(models, registry, transcribe)
     app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 
-    def local_settings_access():
-        return (request.remote_addr in {"127.0.0.1", "::1"}
+    def trusted_settings_client():
+        # Use the socket peer, never client-supplied forwarding headers.
+        try:
+            peer = ipaddress.ip_address(request.remote_addr or "")
+            peer = getattr(peer, "ipv4_mapped", None) or peer
+            return peer.is_loopback or any(peer in ipaddress.ip_network(network) for network in
+                ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7", "fe80::/10"))
+        except ValueError:
+            return False
+
+    def settings_access():
+        return (trusted_settings_client()
                 and secrets.compare_digest(request.headers.get("X-Evora-Settings", ""), settings_nonce))
 
     def uploaded_audio(limit=30):
@@ -80,14 +91,14 @@ def register_routes(app, models, registry, transcribe, decode, lock):
 
     @app.get("/speaker-settings")
     def speaker_settings_page():
-        if request.remote_addr not in {"127.0.0.1", "::1"}:
-            return "Open speaker settings on the Evora computer using localhost.", 403
-        return render_template("speaker_settings.html", nonce=settings_nonce)
+        if not trusted_settings_client():
+            return "Speaker settings are available only on this computer or its private network.", 403
+        return render_template("speaker_settings.html", nonce=settings_nonce), 200, {"Cache-Control": "no-store"}
 
     @app.route("/speaker-settings", methods=["POST"])
     def speaker_settings_save():
-        if not local_settings_access():
-            return jsonify(error="Open settings on the Evora computer to make changes."), 403
+        if not settings_access():
+            return jsonify(error="Open Evora speaker settings from your private network to make changes."), 403
         if not lock.acquire(blocking=False):
             return jsonify(error="Evora is processing audio. Try again shortly."), 409
         try:
@@ -147,8 +158,8 @@ def register_routes(app, models, registry, transcribe, decode, lock):
 
     @app.post("/speakers/enroll")
     def enroll():
-        if not local_settings_access():
-            return jsonify(error="Use speaker settings on the Evora computer."), 403
+        if not settings_access():
+            return jsonify(error="Use Evora speaker settings on your private network."), 403
         if not lock.acquire(blocking=False):
             return jsonify(error="Evora is processing audio."), 409
         try:
@@ -177,8 +188,8 @@ def register_routes(app, models, registry, transcribe, decode, lock):
 
     @app.delete("/speakers/<int:ident>")
     def forget(ident):
-        if not local_settings_access():
-            return jsonify(error="Use speaker settings on the Evora computer."), 403
+        if not settings_access():
+            return jsonify(error="Use Evora speaker settings on your private network."), 403
         if not lock.acquire(blocking=False):
             return jsonify(error="Evora is processing audio."), 409
         try:

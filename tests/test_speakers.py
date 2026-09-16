@@ -1,4 +1,5 @@
 import io
+import re
 import threading
 from pathlib import Path
 
@@ -226,11 +227,33 @@ def test_provisional_cannot_pass_speaker_filter(client):
     assert response.json["text"] == ""
 
 
-def test_settings_require_local_nonce(client):
+def test_settings_require_trusted_peer_and_nonce(client):
     assert client.get("/speaker-settings").status_code == 200
-    assert client.get("/speaker-settings", environ_base={"REMOTE_ADDR": "192.168.1.5"}).status_code == 403
+    assert client.get("/speaker-settings", environ_base={"REMOTE_ADDR": "192.168.1.5"}).status_code == 200
     assert client.post("/speaker-settings", json={}).status_code == 403
     assert client.post("/speakers/enroll", data=upload(name="Eve")).status_code == 403
+
+
+@pytest.mark.parametrize("peer", ["192.168.1.5", "10.1.2.3", "172.16.1.2", "fd00::2", "::ffff:192.168.1.5"])
+def test_remote_settings_can_enroll_and_forget_with_page_nonce(client, peer):
+    env = {"REMOTE_ADDR": peer}
+    page = client.get("/speaker-settings", environ_base=env)
+    assert page.status_code == 200 and page.headers["Cache-Control"] == "no-store"
+    nonce = re.search(r'const nonce="([^"]+)"', page.get_data(as_text=True)).group(1)
+    headers = {"X-Evora-Settings": nonce}
+    enrolled = client.post("/speakers/enroll", data=upload(name="Remote"), headers=headers, environ_base=env)
+    assert enrolled.status_code == 200
+    assert client.delete(f'/speakers/{enrolled.json["id"]}', headers=headers, environ_base=env).status_code == 200
+    assert client.post("/speakers/enroll", data=upload(name="No token"), environ_base=env).status_code == 403
+
+
+def test_public_peer_cannot_spoof_private_settings_access(client):
+    page = client.get("/speaker-settings")
+    nonce = re.search(r'const nonce="([^"]+)"', page.get_data(as_text=True)).group(1)
+    env = {"REMOTE_ADDR": "8.8.8.8"}
+    headers = {"X-Evora-Settings": nonce, "X-Forwarded-For": "127.0.0.1"}
+    assert client.get("/speaker-settings", headers=headers, environ_base=env).status_code == 403
+    assert client.post("/speaker-settings", json={}, headers=headers, environ_base=env).status_code == 403
 
 
 def test_invalid_selection_does_not_consume_stream_sequence(client):

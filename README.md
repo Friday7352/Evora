@@ -18,7 +18,11 @@ speech stays unassigned. Recognition accuracy is not guaranteed, especially
 with voice changers, compression, distance, or people speaking simultaneously.
 
 After updating, open **Open status and speaker setup** in the launcher, then
-**Speaker recognition settings** on the service page (on the Evora computer).
+**Speaker recognition settings** on the service page. With private-network
+access enabled, you can also open `http://EVORA-PC-IP:9000/speaker-settings`
+from your other PC. Frivo 1.3.1's **Speaker setup** link opens the configured
+Evora address automatically. Settings access is limited to the Evora computer
+and its trusted private network; the page token is required for changes.
 Accept the [Community-1 model access conditions](https://huggingface.co/pyannote/speaker-diarization-community-1)
 and provide a Hugging Face read token. Save to download and prepare the models.
 This authorization is for model downloads; audio processing remains local.

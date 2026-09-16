@@ -6,7 +6,11 @@
 `GET /speaker-status` distinguishes `not_configured`, `loading`, `ready`,
 `disabled`, and `error`. It never returns the download token.
 Configure recognition at `http://localhost:9000/speaker-settings` on the server
-computer. Settings and enrollment mutations require its local-only nonce.
+computer, or at `http://EVORA-PC-IP:9000/speaker-settings` from the same
+trusted private network when Evora's private-network access is enabled.
+Settings, enrollment, and forgetting require the page's settings nonce and
+a loopback or private-network peer address. Forwarding headers do not grant
+access. The page is not cached and does not return the saved download token.
 
 ## Clip transcription
 
