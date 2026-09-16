@@ -1,4 +1,4 @@
-# Evora 1.1.0 speaker API
+# Evora 1.2.0 speaker API
 
 ## Compatibility and setup
 
@@ -10,11 +10,21 @@ computer. Settings and enrollment mutations require its local-only nonce.
 
 ## Clip transcription
 
+Create isolated temporary voice memory with `POST /v1/listening-sessions`.
+Pass the returned `listening_session` with every clip, including interim
+clips. Saved voices seed each session; random voices stay within it. Close
+with `DELETE /v1/listening-sessions/ID` after all pending clips complete.
+Eight sessions are supported; sessions idle for 24 hours are pruned when a
+new one opens. An invalidated session returns 409. Enrollment, forgetting,
+configuration, and global voice reset invalidate sessions. Frivo 1.3.0 uses
+these endpoints and displays individual speaker turns.
+
 `POST /v1/audio/transcriptions`, multipart:
 
 - `file` (or `audio`): decodable audio, at most 30 seconds / 16 MB upload.
 - `language`: optional language code; omitted means detect.
 - `speaker`: `0` skips diarization and learning for interim text.
+- `listening_session`: optional session token; omitted uses legacy memory.
 - `allowed_speakers`: optional comma-separated IDs. An empty value accepts
   nobody. Omitted means return all speech, including unassigned speech.
 
@@ -39,6 +49,11 @@ Unknown, provisional, boundary-crossing, and separated words cannot pass it.
 `source` is `clean`, `unknown`, `overlap`, `separated`, `unavailable`, or
 `provisional`. Separation is experimental and can distort words. Overlap that
 cannot be recovered retains the mixed transcript with no accepted identity.
+Two or three concurrent voices can be recovered when enabled. Unidentified
+separated words include a clip-local `track` key so simultaneous streams
+remain distinct without assigning a remembered identity. Separation never
+trains voice profiles. It is enabled by default for new configurations;
+existing settings are preserved.
 
 ## Incremental audio (experimental)
 
@@ -73,8 +88,11 @@ lowering it can admit wrong speakers. Default match threshold is 0.55 with a
 0.10 lead over the next candidate, not a calibrated accuracy guarantee.
 
 Local settings page: `POST /speakers/enroll` takes `name` and `file` and saves
-only audio-derived embeddings from detected solo speech. `DELETE /speakers/ID`
-forgets one voice. Enrolling or forgetting invalidates open streams so stale
+only audio-derived embeddings from detected solo speech.
+Enrollment accepts up to 30 seconds; 20–30 seconds of clear speech is
+recommended. Several samples are retained, and saved voices are not updated
+by live conversation audio.
+`DELETE /speakers/ID` forgets one voice. Enrolling or forgetting invalidates open streams so stale
 identity selections cannot keep being used.
 
 ## Validation before enabling automatic replies

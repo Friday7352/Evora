@@ -10,6 +10,7 @@ from evora_speakers import RATE, SpeakerAnalyzer, SpeakerRegistry, StreamSession
 
 def register_routes(app, models, registry, transcribe, decode, lock):
     sessions = {}
+    listening_sessions = {}
     settings_nonce = secrets.token_urlsafe(32)
     analyzer = SpeakerAnalyzer(models, registry, transcribe)
     app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
@@ -47,6 +48,36 @@ def register_routes(app, models, registry, transcribe, decode, lock):
             result["provisional_segments"] = []
         return result
 
+    @app.route("/v1/listening-sessions", methods=["POST"])
+    def create_listening_session():
+        if not lock.acquire(blocking=False):
+            return jsonify(error="Evora is processing audio. Try again shortly."), 409
+        try:
+            now = time.monotonic()
+            for key in list(listening_sessions):
+                if now - listening_sessions[key][1] > 86400:
+                    del listening_sessions[key]
+            if len(listening_sessions) >= 8:
+                return jsonify(error="Too many listening sessions. Close an old session first."), 429
+            ident = secrets.token_urlsafe(24)
+            voices = SpeakerRegistry(registry.embed, registry.path,
+                                     threshold=registry.threshold, margin=registry.margin)
+            listening_sessions[ident] = [SpeakerAnalyzer(models, voices, transcribe), now]
+            return jsonify(listening_session=ident, speaker_session=voices.session_id,
+                           speaker_status=models.status())
+        finally:
+            lock.release()
+
+    @app.delete("/v1/listening-sessions/<ident>")
+    def close_listening_session(ident):
+        if not lock.acquire(blocking=False):
+            return jsonify(error="Evora is processing audio. Try again shortly."), 409
+        try:
+            listening_sessions.pop(ident, None)
+            return jsonify(ok=True)
+        finally:
+            lock.release()
+
     @app.get("/speaker-settings")
     def speaker_settings_page():
         if request.remote_addr not in {"127.0.0.1", "::1"}:
@@ -67,6 +98,7 @@ def register_routes(app, models, registry, transcribe, decode, lock):
                 raise ValueError("Expected settings object")
             models.configure(data)
             sessions.clear()
+            listening_sessions.clear()
             return jsonify(models.status())
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
@@ -85,6 +117,7 @@ def register_routes(app, models, registry, transcribe, decode, lock):
             if request.method == "DELETE":
                 registry.reset()
                 sessions.clear()
+                listening_sessions.clear()
             return jsonify(enabled=models.state == "ready", backend="community-1 + ecapa",
                            threshold=registry.threshold, margin=registry.margin,
                            speakers=registry.summary(), speaker_session=registry.session_id,
@@ -104,6 +137,8 @@ def register_routes(app, models, registry, transcribe, decode, lock):
             registry.threshold = value
             for session in sessions.values():
                 session.analyzer.registry.threshold = value
+            for active, _ in listening_sessions.values():
+                active.registry.threshold = value
             return jsonify(ok=True, threshold=value)
         except (ValueError, TypeError):
             return jsonify(error="threshold must be a number between 0.3 and 0.95"), 400
@@ -122,7 +157,7 @@ def register_routes(app, models, registry, transcribe, decode, lock):
             name = request.form.get("name", "").strip()
             if not name or len(name) > 80:
                 raise ValueError("Enter a speaker name of 1 to 80 characters")
-            audio = uploaded_audio(20)
+            audio = uploaded_audio(30)
             spans = partition_turns(models.turns(audio), len(audio) / RATE)
             active = {s for _, _, labels in spans for s in labels}
             if len(active) != 1 or any(len(labels) > 1 for _, _, labels in spans):
@@ -131,6 +166,7 @@ def register_routes(app, models, registry, transcribe, decode, lock):
             clean = np.concatenate([audio[int(a * RATE):int(b * RATE)] for a, b, labels in spans if labels])
             ident = registry.enroll(clean, name)
             sessions.clear()
+            listening_sessions.clear()
             return jsonify(id=ident, name=name, confirmed=True)
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
@@ -149,6 +185,7 @@ def register_routes(app, models, registry, transcribe, decode, lock):
             registry.voices.pop(ident, None)
             registry.save()
             sessions.clear()
+            listening_sessions.clear()
             return jsonify(ok=True)
         finally:
             lock.release()
@@ -163,11 +200,18 @@ def register_routes(app, models, registry, transcribe, decode, lock):
             audio = uploaded_audio()
             language = request.form.get("language", "").strip() or None
             want_speaker = request.form.get("speaker", "1").lower() not in {"0", "false", "no"}
+            active_analyzer = analyzer
+            listening_id = request.form.get("listening_session")
+            if listening_id:
+                if listening_id not in listening_sessions:
+                    return jsonify(error="Listening session expired. Stop and restart listening."), 409
+                active_analyzer = listening_sessions[listening_id][0]
+                listening_sessions[listening_id][1] = time.monotonic()
             if want_speaker:
-                result = analyzer.analyze(audio, language)
+                result = active_analyzer.analyze(audio, language)
             else:
                 words, detected = transcribe(audio, language)
-                result = analyzer.result([analyzer.segment(w["start"], w["end"], w["text"], None,
+                result = active_analyzer.result([analyzer.segment(w["start"], w["end"], w["text"], None,
                                                            False, "provisional") for w in words], detected)
             result = selected(result)
             result.update(duration=round(len(audio) / RATE, 3), processing_seconds=round(time.perf_counter() - started, 3))

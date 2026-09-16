@@ -67,14 +67,16 @@ class SpeakerRegistry:
         if best >= self.threshold and gap >= self.margin:
             ident = scores[0][1]
             voice = self.voices[ident]
-            if clean and learn and len(audio) >= int(1.5 * RATE):
+            if clean and learn and not voice["name"]:
                 voice["samples"].append(vector)
                 voice["samples"] = voice["samples"][-12:]
-                voice["confirmed"] = True
-        elif clean and learn and len(audio) >= 2 * RATE and best < self.threshold - self.margin:
+                voice["clean_seconds"] = voice.get("clean_seconds", 0) + len(audio) / RATE
+                voice["confirmed"] = len(voice["samples"]) >= 2 and voice["clean_seconds"] >= 3
+        elif clean and learn and len(audio) >= RATE and best < self.threshold - self.margin:
             ident = self.next_id
             self.next_id += 1
-            self.voices[ident] = {"name": "", "samples": [vector], "confirmed": False}
+            self.voices[ident] = {"name": "", "samples": [vector], "confirmed": False,
+                                  "clean_seconds": len(audio) / RATE}
         if ident is None:
             return None
         voice = self.voices[ident]
@@ -84,12 +86,16 @@ class SpeakerRegistry:
     def enroll(self, audio, name):
         if len(audio) < 3 * RATE:
             raise ValueError("Provide at least three seconds of clear speech from one person.")
-        vector = self.normalize(self.embed(audio))
+        # Several independent samples capture natural variation without one
+        # long averaged fingerprint washing it out.
+        samples = [self.normalize(self.embed(audio[start:start + 5 * RATE]))
+                   for start in range(0, len(audio), 5 * RATE)
+                   if len(audio[start:start + 5 * RATE]) >= 3 * RATE]
         ident = next((i for i, voice in self.voices.items() if voice["name"].casefold() == name.casefold()), None)
         if ident is None:
             ident = self.next_id
             self.next_id += 1
-        self.voices[ident] = {"name": name, "samples": [vector], "confirmed": True}
+        self.voices[ident] = {"name": name, "samples": samples, "confirmed": True}
         self.save()
         return ident
 
@@ -134,10 +140,11 @@ class LocalModels:
         self.lock = threading.RLock()
         self.pipeline = None
         self.separator = None
+        self.separator_count = 2
         self.state = "not_configured"
         self.error = ""
         self.settings_path = self.root / "speaker_settings.json"
-        self.settings = {"enabled": True, "recover_overlap": False, "token": ""}
+        self.settings = {"enabled": True, "recover_overlap": True, "token": ""}
         if self.settings_path.exists():
             self.settings.update(json.loads(self.settings_path.read_text(encoding="utf-8")))
         self.settings["token"] = os.environ.get("HF_TOKEN", self.settings["token"])
@@ -195,6 +202,7 @@ class LocalModels:
                     self.separator = SepformerSeparation.from_hparams(
                         source="speechbrain/sepformer-whamr", savedir=str(self.root / "separation_model"),
                         run_opts={"device": self.device}, local_strategy=LocalStrategy.COPY)
+                    self.separator_count = 2
                 if self.warmup:
                     self.warmup()
                 self.state = "ready"
@@ -216,12 +224,24 @@ class LocalModels:
             return [(turn.start, turn.end, speaker)
                     for turn, _, speaker in result.speaker_diarization.itertracks(yield_label=True)]
 
-    def separate(self, audio):
+    def separate(self, audio, count=2):
         import torch
         import torchaudio.functional as audio_ops
         with self.lock, torch.inference_mode():
-            if self.separator is None:
+            if count not in (2, 3):
                 return []
+            if self.separator is None or self.separator_count != count:
+                from speechbrain.inference.separation import SepformerSeparation
+                from speechbrain.utils.fetching import LocalStrategy
+                # Keep only one separator resident on an 8 GB GPU.
+                self.separator = None
+                if self.device == "cuda":
+                    torch.cuda.empty_cache()
+                model_id = "sepformer-whamr" if count == 2 else "sepformer-wsj03mix"
+                self.separator = SepformerSeparation.from_hparams(
+                    source="speechbrain/" + model_id, savedir=str(self.root / "separation_model" / model_id),
+                    run_opts={"device": self.device}, local_strategy=LocalStrategy.COPY)
+                self.separator_count = count
             samples = torch.from_numpy(audio.copy()).float().unsqueeze(0).to(self.device)
             samples = audio_ops.resample(samples, RATE, 8000)
             sources = self.separator.separate_batch(samples)[0].transpose(0, 1)
@@ -279,27 +299,37 @@ class SpeakerAnalyzer:
         recovered = []
         if self.models.settings["recover_overlap"]:
             for a, b, active in spans:
-                if len(active) != 2 or b - a < 0.7:
+                if len(active) not in (2, 3) or b - a < 0.7:
                     continue
                 try:
-                    sources = self.models.separate(audio[int(a * RATE):int(b * RATE)])
-                except RuntimeError:
+                    sources = self.models.separate(audio[int(a * RATE):int(b * RATE)], count=len(active))
+                except Exception:
                     # A separator failure must not erase the original transcript.
                     sources = []
                 candidates = []
                 for source in sources:
                     match = self.registry.identify(source, learn=False, clean=False)
-                    allowed = {matches[s]["id"] for s in active if matches[s] and matches[s]["confirmed"]}
+                    # A familiar voice can overlap for this entire clip. Its
+                    # clean reference may have come from an earlier clip.
+                    allowed = {i for i, v in self.registry.voices.items() if v["confirmed"]}
                     if not match or not match["confirmed"] or match["id"] not in allowed:
-                        break
+                        match = None
                     recovered_words, _ = self.transcribe(source, language or detected)
+                    if not recovered_words:
+                        break
                     candidates.append((match, recovered_words))
-                if len(candidates) == 2 and candidates[0][0]["id"] != candidates[1][0]["id"]:
+                if len(candidates) == len(active):
+                    identities = [m["id"] for m, _ in candidates if m]
+                    duplicates = {i for i in identities if identities.count(i) > 1}
                     recovered.append((a, b))
-                    for match, entries in candidates:
+                    for track, (match, entries) in enumerate(candidates):
+                        if match and match["id"] in duplicates:
+                            match = None
                         for word in entries:
-                            segments.append(self.segment(a + word["start"], min(b, a + word["end"]),
-                                                         word["text"], match, True, "separated"))
+                            item = self.segment(a + word["start"], min(b, a + word["end"]),
+                                                word["text"], match, True, "separated")
+                            item["track"] = f"overlap-{a:.3f}-{track}"
+                            segments.append(item)
         for word in words:
             a, b = word["start"], word["end"]
             if any(x <= a and b <= y for x, y in recovered):

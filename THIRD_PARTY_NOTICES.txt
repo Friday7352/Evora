@@ -17,9 +17,10 @@ Downloaded separately after the user accepts the model access conditions.
 
 SpeechBrain: Apache License 2.0, SpeechBrain contributors.
 https://github.com/speechbrain/speechbrain
-ECAPA voice encoder and SepFormer WHAMR separation model: Apache License 2.0.
+ECAPA voice encoder and SepFormer WHAMR / WSJ03Mix separation models: Apache License 2.0.
 https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb
 https://huggingface.co/speechbrain/sepformer-whamr
+https://huggingface.co/speechbrain/sepformer-wsj03mix
 https://www.apache.org/licenses/LICENSE-2.0
 Models are downloaded unmodified; Evora adds segmentation, matching, and filtering.
 PyTorch, torchaudio, and TorchCodec retain their upstream license notices in

@@ -117,7 +117,7 @@ def test_recovered_overlap_is_never_accepted_for_filtering():
     class Separation(Models):
         settings = {"recover_overlap": True}
 
-        def separate(self, samples):
+        def separate(self, samples, count=2):
             return [audio(len(samples) / RATE), audio(len(samples) / RATE, 2)]
 
     registry = SpeakerRegistry(embed)
@@ -251,3 +251,74 @@ def test_stream_retry_and_unknown_session(client):
     assert second.status_code == 200
     assert second.json["next_sequence"] == 2
     assert client.post("/v1/audio/stream", data=upload(session_id="missing")).status_code == 400
+
+
+def test_listening_sessions_remember_randoms_without_leaking_between_sessions(client):
+    first = client.post("/v1/listening-sessions").json["listening_session"]
+    second = client.post("/v1/listening-sessions").json["listening_session"]
+    def hear(session):
+        return client.post("/v1/audio/transcriptions", data=upload(audio(3, 2), listening_session=session)).json
+    initial = hear(first)["segments"][0]["speaker"]
+    assert initial and not initial["confirmed"]
+    # Polling setup must not clear active listening memory.
+    assert client.get("/speakers").status_code == 200
+    repeated = hear(first)["segments"][0]["speaker"]
+    assert repeated["id"] == initial["id"] and repeated["confirmed"]
+    assert not hear(second)["segments"][0]["speaker"]["confirmed"]
+    client.delete("/v1/listening-sessions/" + first)
+    assert client.post("/v1/audio/transcriptions", data=upload(listening_session=first)).status_code == 409
+    assert hear(second)["segments"][0]["speaker"]["confirmed"]
+
+
+def test_thirty_second_enrollment_keeps_multiple_samples(tmp_path):
+    registry = SpeakerRegistry(embed, tmp_path / "voices.json")
+    ident = registry.enroll(audio(30), "Alice")
+    assert len(registry.voices[ident]["samples"]) == 6
+    registry.identify(audio(3), clean=True, learn=True)
+    assert len(registry.voices[ident]["samples"]) == 6  # saved identity cannot drift
+    assert len(SpeakerRegistry(embed, registry.path).voices[ident]["samples"]) == 6
+
+
+def test_short_random_utterances_accumulate_evidence():
+    registry = SpeakerRegistry(embed)
+    a = registry.identify(audio(1), learn=True, clean=True)
+    b = registry.identify(audio(1), learn=True, clean=True)
+    c = registry.identify(audio(1), learn=True, clean=True)
+    assert a["id"] == b["id"] == c["id"]
+    assert not a["confirmed"] and not b["confirmed"] and c["confirmed"]
+
+
+def test_three_known_voices_can_be_matched_during_full_clip_overlap():
+    class Three(Models):
+        settings = {"recover_overlap": True}
+        def separate(self, samples, count=2):
+            assert count == 3
+            return [audio(3, i) for i in (1, 2, 3)]
+    registry = SpeakerRegistry(lambda samples: np.eye(3)[int(round(np.mean(samples))) - 1])
+    for i, name in enumerate(("Alice", "Bob", "Charlie"), 1):
+        registry.enroll(audio(3, i), name)
+    result = SpeakerAnalyzer(Three([(0, 3, s) for s in "abc"]), registry, asr).analyze(audio(3))
+    assert {s["speaker"]["id"] for s in result["segments"]} == {1, 2, 3}
+    assert all(s["source"] == "separated" and not s["accepted"] for s in result["segments"])
+
+
+def test_unfamiliar_overlapping_tracks_stay_distinct_without_learning():
+    class Two(Models):
+        settings = {"recover_overlap": True}
+        def separate(self, samples, count=2):
+            return [audio(3, 1), audio(3, 2)]
+    registry = SpeakerRegistry(embed)
+    result = SpeakerAnalyzer(Two([(0, 3, "a"), (0, 3, "b")]), registry, asr).analyze(audio())
+    assert len({s["track"] for s in result["segments"]}) == 2
+    assert all(s["speaker"] is None and not s["accepted"] for s in result["segments"])
+    assert not registry.voices
+
+
+def test_separator_download_failure_preserves_unidentified_transcript():
+    class Failed(Models):
+        settings = {"recover_overlap": True}
+        def separate(self, samples, count=2):
+            raise OSError("Model download unavailable")
+    result = SpeakerAnalyzer(Failed([(0, 3, "a"), (0, 3, "b")]), SpeakerRegistry(embed), asr).analyze(audio())
+    assert result["text"]
+    assert all(s["speaker"] is None and s["overlapping"] for s in result["segments"])

@@ -9,7 +9,7 @@ Evora is an optional companion to [Frivo](https://github.com/Friday7352/Frivo).
 It provides the local OpenAI-compatible `/v1/audio/transcriptions` address
 that Frivo uses while listening.
 
-## Speaker recognition in 1.1.0
+## Speaker recognition in 1.2.0
 
 Evora can now return individual speaker segments with word timestamps,
 detect overlapping voices, and remember explicitly enrolled voices. It uses
@@ -24,7 +24,8 @@ and provide a Hugging Face read token. Save to download and prepare the models.
 This authorization is for model downloads; audio processing remains local.
 Until preparation completes, transcription works but speaker labels are unavailable.
 
-Use **Remember a voice** to enroll 3–20 seconds of one person speaking alone.
+Use **Remember a voice** to enroll 20–30 seconds of one person speaking alone
+(minimum 3 seconds).
 Saved voices survive restarts and updates. Automatically discovered voices
 remain session-only and need additional clean speech before confirmation.
 The **Forget** button removes a saved voice. No raw enrollment audio is retained.
@@ -35,15 +36,17 @@ CPU installations keep the smaller model. The installer sets up CUDA 12.6
 PyTorch on detected NVIDIA GPUs, including the RTX 2070 Super generation.
 Available GPU memory and speed must be measured alongside other running apps.
 
-Experimental overlap recovery uses SepFormer only on detected two-person
-overlap. It is off by default to minimize delay. Recovered words remain
-uncertain and are excluded from strict speaker filtering. Three or more
-simultaneous voices are not separated by this release.
+Experimental overlap recovery uses SepFormer on detected two- or three-person
+overlap. New configurations enable it; upgrades retain the existing setting.
+Enable it in speaker settings if previously disabled. Recovered words remain
+uncertain and are excluded from strict speaker filtering. More than three
+simultaneous voices are not separated by this release. Separation and switching
+models add delay; the three-speaker model downloads when first needed.
 
-Frivo's existing transcription connection remains compatible. Its current UI
-still consumes one speaker label per clip; mixed-speaker clips now return no
-single label. A future Frivo update must consume the new segments and stream
-API to display multiple speakers, use incremental results, and offer speaker
+Frivo 1.3.0 displays individual speaker turns and recovered overlap tracks,
+translates each turn, and maintains temporary identities per listening session.
+Saved voices seed every session. Older clients can still use the legacy API.
+The experimental stream API remains available for future incremental results and speaker
 selection. See [the API guide](docs/speaker-api.md).
 
 ![Evora launcher showing a running service, local and network addresses, active model, and GPU processing](docs/screenshots/launcher.png)

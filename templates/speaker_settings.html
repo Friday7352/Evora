@@ -15,10 +15,10 @@ a{color:#a8dbc9}label{display:block;margin:12px 0}small{color:#b6c6d1}#message{w
 <label>Read token<input id="token" type="password" autocomplete="off" placeholder="Leave blank to keep the saved token"></label>
 <small>The token is stored on this computer for model downloads. It is never returned by this page.</small>
 <label><input id="enabled" type="checkbox" checked> Enable speaker recognition</label>
-<label><input id="recover" type="checkbox"> Try recovering two overlapping voices (experimental; adds delay)</label>
+<label><input id="recover" type="checkbox"> Recover two or three overlapping voices (experimental; adds delay)</label>
 <small>Recovered overlap is displayed as uncertain and excluded from speaker filtering. Recognition cannot guarantee every word or identity.</small>
 <p><button id="save">Save and prepare models</button></p><p id="status" role="status"></p></section>
-<section><h2>Remember a voice</h2><p>Upload a 3–20 second recording of one person speaking clearly alone. Only saved voices are remembered after restarting.</p>
+<section><h2>Remember a voice</h2><p>Upload 20–30 seconds of one person speaking clearly alone (minimum 3 seconds). Several voice samples are saved for that person. Saved voices survive restarts; unfamiliar voices are learned temporarily in each Frivo listening session.</p>
 <label>Speaker name<input id="name" type="text" maxlength="80"></label>
 <label>Voice recording <input id="audio" type="file" accept="audio/*"></label>
 <button id="enroll">Save voice</button><ul id="voices"></ul></section>
