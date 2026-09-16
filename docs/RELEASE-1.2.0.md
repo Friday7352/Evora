@@ -1,5 +1,13 @@
 # Evora 1.2.0
 
+## 1.2.3 diagnostic patch
+
+Report the setup stage and detailed dependency import failures in speaker
+settings and the service log. Credentials and download URLs are redacted.
+This identifies installation-specific missing components instead of incorrectly
+suggesting a token change for every ImportError. It does not itself repair
+an unknown missing dependency.
+
 ## 1.2.2 patch
 
 Add a scoped allowlist for official pyannote checkpoint metadata when loading

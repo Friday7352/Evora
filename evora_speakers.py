@@ -7,12 +7,25 @@ import threading
 import time
 import uuid
 import pickle
+import re
+import traceback
 from pathlib import Path
 
 import numpy as np
 
 RATE = 16000
 MODEL = "pyannote/speaker-diarization-community-1"
+
+
+def model_error_details(exc, token=""):
+    """Retain actionable dependency errors without publishing credentials."""
+    details = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+    if token:
+        details = details.replace(token, "[redacted]")
+    details = re.sub(r"hf_[A-Za-z0-9_-]+", "[redacted]", details)
+    details = re.sub(r"https?://\S+", "[download address]", details)
+    details = re.sub(r"(?i)(bearer\s+|(?:token|authorization|password)\s*[=:]\s*)[^\s,;]+", r"\1[redacted]", details)
+    return details[:1600]
 
 
 def load_speaker_pipeline(cache_dir, token):
@@ -157,6 +170,7 @@ class LocalModels:
         self.separator_count = 2
         self.state = "not_configured"
         self.error = ""
+        self.stage = "idle"
         self.settings_path = self.root / "speaker_settings.json"
         self.settings = {"enabled": True, "recover_overlap": True, "token": ""}
         if self.settings_path.exists():
@@ -166,6 +180,7 @@ class LocalModels:
 
     def status(self):
         return {"state": self.state, "error": self.error, "model": MODEL, "device": self.device,
+                "stage": self.stage,
                 "enabled": self.settings["enabled"], "recover_overlap": self.settings["recover_overlap"],
                 "token_set": bool(self.settings["token"])}
 
@@ -204,11 +219,14 @@ class LocalModels:
     def _load(self):
         with self.lock:
             try:
+                self.stage = "loading speaker detection"
                 import torch
                 pipeline = load_speaker_pipeline(self.root / "model_cache", self.settings["token"])
+                self.stage = "moving speaker detection to " + self.device
                 pipeline.to(torch.device(self.device))
                 self.pipeline = pipeline
                 if self.settings["recover_overlap"]:
+                    self.stage = "loading overlap recovery"
                     from speechbrain.inference.separation import SepformerSeparation
                     from speechbrain.utils.fetching import LocalStrategy
                     self.separator = SepformerSeparation.from_hparams(
@@ -216,17 +234,24 @@ class LocalModels:
                         run_opts={"device": self.device}, local_strategy=LocalStrategy.COPY)
                     self.separator_count = 2
                 if self.warmup:
+                    self.stage = "loading voice recognition"
                     self.warmup()
+                self.stage = "ready"
                 self.state = "ready"
             except Exception as exc:
                 self.pipeline = None
                 self.separator = None
                 self.state = "error"
+                details = model_error_details(exc, self.settings["token"])
+                print(f"Speaker setup failed while {self.stage}: {details}", flush=True)
                 # Do not expose upstream errors which may contain download credentials.
-                if isinstance(exc, pickle.UnpicklingError):
+                if isinstance(exc, ImportError):
+                    self.error = (f"A required software component could not load while {self.stage}. "
+                                  f"{details} This is a dependency problem; changing your Hugging Face token will not fix it.")
+                elif isinstance(exc, pickle.UnpicklingError):
                     self.error = ("Speaker model file could not be read (UnpicklingError). "
                                   "This indicates model compatibility or a damaged download, not necessarily a token problem. "
-                                  "Update Evora and retry. If it persists, report this error.")
+                                  f"Details while {self.stage}: {details}")
                 else:
                     self.error = (f"Speaker model could not load ({type(exc).__name__}). Accept the model access "
                                   "conditions, check your read token and internet connection, then save settings to retry.")
