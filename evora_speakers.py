@@ -9,12 +9,33 @@ import uuid
 import pickle
 import re
 import traceback
+import sys
 from pathlib import Path
 
 import numpy as np
 
 RATE = 16000
 MODEL = "pyannote/speaker-diarization-community-1"
+
+
+def prepare_speechbrain_imports():
+    """Work around SpeechBrain 1.1's POSIX-only inspect.py path guard."""
+    import torch._dynamo  # initialize before SpeechBrain registers lazy modules
+    from speechbrain.utils.importutils import LazyModule
+    original = LazyModule.__getattr__
+    if getattr(original, "_evora_inspect_guard", False):
+        return
+
+    def guarded_getattr(module, name):
+        # Only introspection is ignored. Explicit access still loads the real
+        # component and reports missing dependencies normally.
+        caller = sys._getframe(1).f_code.co_filename.replace("\\", "/")
+        if caller.rsplit("/", 1)[-1] == "inspect.py":
+            raise AttributeError(name)
+        return original(module, name)
+
+    guarded_getattr._evora_inspect_guard = True
+    LazyModule.__getattr__ = guarded_getattr
 
 
 def model_error_details(exc, token=""):
@@ -31,6 +52,7 @@ def model_error_details(exc, token=""):
 def load_speaker_pipeline(cache_dir, token):
     """Allow only the metadata types used by official pyannote checkpoints."""
     import torch
+    prepare_speechbrain_imports()
     from pyannote.audio import Pipeline
     from pyannote.audio.core.task import Specifications, Problem, Resolution
     from torch.torch_version import TorchVersion

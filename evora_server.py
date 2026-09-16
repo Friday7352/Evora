@@ -176,6 +176,8 @@ try:
     # Torch's first dynamo import inspects loaded modules. Initialize it before
     # SpeechBrain installs lazy optional modules (notably unavailable Windows k2).
     import torch._dynamo  # type: ignore
+    from evora_speakers import prepare_speechbrain_imports
+    prepare_speechbrain_imports()
 
     try:
         from speechbrain.inference.speaker import EncoderClassifier  # type: ignore

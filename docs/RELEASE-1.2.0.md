@@ -1,5 +1,13 @@
 # Evora 1.2.0
 
+## 1.2.4 patch
+
+Fix the reproduced Windows import failure for SpeechBrain's optional k2
+integration. SpeechBrain 1.1's inspection guard matches POSIX paths only;
+Evora now guards Windows inspection calls too, before loading voice models.
+Explicit component imports retain normal behavior. No k2 installation is
+needed for Evora's speaker recognition.
+
 ## 1.2.3 diagnostic patch
 
 Report the setup stage and detailed dependency import failures in speaker
