@@ -9,7 +9,7 @@ Evora is an optional companion to [Frivo](https://github.com/Friday7352/Frivo).
 It provides the local OpenAI-compatible `/v1/audio/transcriptions` address
 that Frivo uses while listening.
 
-## Speaker recognition in 1.2.0
+## Speaker recognition in 1.3.0
 
 Evora can now return individual speaker segments with word timestamps,
 detect overlapping voices, and remember explicitly enrolled voices. It uses
@@ -31,7 +31,10 @@ Until preparation completes, transcription works but speaker labels are unavaila
 Use **Remember a voice** to enroll 20–30 seconds of one person speaking alone
 (minimum 3 seconds).
 Saved voices survive restarts and updates. Automatically discovered voices
-remain session-only and need additional clean speech before confirmation.
+remain session-only. New random speakers stay unidentified until at least
+three consistent samples provide nine seconds of clear solo speech. Short
+clips and overlap do not create new speaker profiles. Confirmed profiles
+remain fixed; uncertain matches stay unidentified rather than being guessed.
 The **Forget** button removes a saved voice. No raw enrollment audio is retained.
 
 GPU installations default to `large-v3-turbo` with `int8_float16` computation.

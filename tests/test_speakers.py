@@ -49,10 +49,11 @@ def test_never_learn_from_mixed_or_uncertain_audio():
     assert registry.identify(audio(), clean=False, learn=True) is None
     assert not registry.voices
     first = registry.identify(audio(), clean=True, learn=True)
-    assert not first["confirmed"]
+    assert first is None
     for _ in range(4):
         registry.identify(audio(), clean=False, learn=True)
-    assert len(registry.voices[1]["samples"]) == 1
+    assert len(registry.voices[-1]["samples"]) == 1
+    assert registry.identify(audio(), clean=True, learn=True) is None
     assert registry.identify(audio(), clean=True, learn=True)["confirmed"]
 
 
@@ -282,14 +283,17 @@ def test_listening_sessions_remember_randoms_without_leaking_between_sessions(cl
     def hear(session):
         return client.post("/v1/audio/transcriptions", data=upload(audio(3, 2), listening_session=session)).json
     initial = hear(first)["segments"][0]["speaker"]
-    assert initial and not initial["confirmed"]
+    assert initial is None
     # Polling setup must not clear active listening memory.
     assert client.get("/speakers").status_code == 200
     repeated = hear(first)["segments"][0]["speaker"]
-    assert repeated["id"] == initial["id"] and repeated["confirmed"]
-    assert not hear(second)["segments"][0]["speaker"]["confirmed"]
+    assert repeated is None
+    confirmed = hear(first)["segments"][0]["speaker"]
+    assert confirmed["id"] == 2 and confirmed["confirmed"]
+    assert hear(second)["segments"][0]["speaker"] is None
     client.delete("/v1/listening-sessions/" + first)
     assert client.post("/v1/audio/transcriptions", data=upload(listening_session=first)).status_code == 409
+    assert hear(second)["segments"][0]["speaker"] is None
     assert hear(second)["segments"][0]["speaker"]["confirmed"]
 
 
@@ -302,13 +306,60 @@ def test_thirty_second_enrollment_keeps_multiple_samples(tmp_path):
     assert len(SpeakerRegistry(embed, registry.path).voices[ident]["samples"]) == 6
 
 
-def test_short_random_utterances_accumulate_evidence():
+def test_short_random_utterances_never_create_speakers():
     registry = SpeakerRegistry(embed)
     a = registry.identify(audio(1), learn=True, clean=True)
     b = registry.identify(audio(1), learn=True, clean=True)
     c = registry.identify(audio(1), learn=True, clean=True)
-    assert a["id"] == b["id"] == c["id"]
-    assert not a["confirmed"] and not b["confirmed"] and c["confirmed"]
+    assert a is None and b is None and c is None
+    assert not registry.voices
+
+
+def test_candidate_requires_three_clips_and_nine_seconds_then_freezes():
+    registry = SpeakerRegistry(embed)
+    assert registry.identify(audio(6), clean=True, learn=True) is None
+    assert registry.identify(audio(2), clean=True, learn=True) is None
+    assert registry.summary() == []
+    confirmed = registry.identify(audio(2), clean=True, learn=True)
+    assert confirmed["id"] == 1 and confirmed["confirmed"]
+    before = len(registry.voices[1]["samples"])
+    assert registry.identify(audio(3), clean=True, learn=True)["id"] == 1
+    assert len(registry.voices[1]["samples"]) == before
+
+
+def test_ambiguous_voice_does_not_get_label_or_duplicate_candidate():
+    vectors = {1: [1, 0], 2: [.6, .8]}
+    registry = SpeakerRegistry(lambda x: vectors[int(round(np.mean(x)))])
+    registry.enroll(audio(), "Alice")
+    for _ in range(5):
+        assert registry.identify(audio(3, 2), clean=True, learn=True) is None
+    assert len(registry.voices) == 1
+
+
+def test_missed_turn_change_is_not_learned_as_one_voice():
+    registry = SpeakerRegistry(embed)
+    assert registry.identify(np.concatenate([audio(3, 1), audio(3, 2)]), clean=True, learn=True) is None
+    assert not registry.voices
+
+
+def test_one_stretched_word_is_not_enrollment_evidence():
+    registry = SpeakerRegistry(embed)
+    engine = SpeakerAnalyzer(Models(), registry, lambda *_: ([{"start": 0, "end": 3, "text": "hey"}], "en"))
+    for _ in range(5):
+        assert engine.analyze(audio())["segments"][0]["speaker"] is None
+    assert not registry.voices
+
+
+def test_alternating_randoms_keep_two_stable_labels():
+    registry = SpeakerRegistry(embed)
+    engine = SpeakerAnalyzer(Models(), registry, asr)
+    for _ in range(2):
+        for voice in (1, 2):
+            assert engine.analyze(audio(3, voice))["speaker"] is None
+    for _ in range(4):
+        for voice in (1, 2):
+            assert engine.analyze(audio(3, voice))["speaker"]["id"] == voice
+    assert len(registry.summary()) == 2
 
 
 def test_three_known_voices_can_be_matched_during_full_clip_overlap():

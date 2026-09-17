@@ -217,7 +217,7 @@ function Copy-ProgramFiles([string] $Destination) {
     Copy-Item -LiteralPath (Join-Path $SourceDir 'templates\speaker_settings.html') -Destination $templates -Force
     $docs = Join-Path $Destination 'docs'
     New-Item -ItemType Directory -Path $docs -Force | Out-Null
-    foreach ($name in @('speaker-api.md', 'RELEASE-1.1.0.md', 'RELEASE-1.2.0.md')) {
+    foreach ($name in @('speaker-api.md', 'RELEASE-1.1.0.md', 'RELEASE-1.2.0.md', 'RELEASE-1.3.0.md')) {
         Copy-Item -LiteralPath (Join-Path $SourceDir ('docs\' + $name)) -Destination $docs -Force
     }
 }

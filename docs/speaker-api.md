@@ -1,4 +1,4 @@
-# Evora 1.2.0 speaker API
+# Evora 1.3.0 speaker API
 
 ## Compatibility and setup
 
@@ -50,6 +50,13 @@ do not assume an anonymous ID means the same person after a reset or restart.
 Strict filtering uses only `accepted` clean speech from confirmed speakers.
 Unknown, provisional, boundary-crossing, and separated words cannot pass it.
 
+In 1.3.1, recovered segments also carry their own `language`. With the optional
+`track_overlap` setting, a recovered segment may carry `voice_track` with a
+session-scoped string `id`, display `label`, and `verified: false`. This is not
+a speaker identity. Clients must not merge its ID namespace with `speaker.id`
+or use it for speaker filtering. The default is disabled pending real-world
+quality validation. Settings/status include the `track_overlap` boolean.
+
 `source` is `clean`, `unknown`, `overlap`, `separated`, `unavailable`, or
 `provisional`. Separation is experimental and can distort words. Overlap that
 cannot be recovered retains the mixed transcript with no accepted identity.
@@ -88,8 +95,12 @@ a fresh session rather than blindly retrying an already consumed sequence.
 `GET /speakers` lists legacy-session voices and saved enrollment voices.
 `DELETE /speakers` resets anonymous voices and active streams while retaining
 saved voices. `POST /speakers/threshold` retains the existing threshold API;
-lowering it can admit wrong speakers. Default match threshold is 0.55 with a
-0.10 lead over the next candidate, not a calibrated accuracy guarantee.
+raising it makes matching stricter. Clean matches have a minimum threshold
+of 0.72 and margin 0.15; separated matches require 0.82 and margin 0.20.
+These cosine scores are not calibrated correctness probabilities. New random
+voices require three consistent samples and nine seconds of clear speech;
+pending candidates are hidden and never pass filtering. Confirmed profiles
+do not adapt to live matches. See RELEASE-1.3.0.md for evidence requirements.
 
 Local settings page: `POST /speakers/enroll` takes `name` and `file` and saves
 only audio-derived embeddings from detected solo speech.

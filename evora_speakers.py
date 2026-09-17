@@ -98,10 +98,20 @@ class SpeakerRegistry:
             raise ValueError("Invalid voice embedding")
         return value / norm
 
-    def identify(self, audio, *, learn=False, clean=False):
-        if len(audio) / RATE < 0.7:
+    def identify(self, audio, *, learn=False, clean=False, include_pending=False):
+        seconds = len(audio) / RATE
+        if seconds < (1.5 if clean else 2.0):
             return None
         vector = self.normalize(self.embed(audio))
+        # Reject inconsistent multi-second samples instead of averaging two
+        # voices into a new identity when diarization misses a change.
+        if seconds >= 4:
+            middle = len(audio) // 2
+            halves = [self.normalize(self.embed(part)) for part in (audio[:middle], audio[middle:])]
+            if float(halves[0] @ halves[1]) < 0.80:
+                return None
+        threshold = max(self.threshold, 0.72 if clean else 0.82)
+        margin = max(self.margin, 0.15 if clean else 0.20)
         scores = []
         for ident, voice in self.voices.items():
             # A centroid plus median reduces the effect of a single bad sample.
@@ -113,22 +123,35 @@ class SpeakerRegistry:
         best = scores[0][0] if scores else -1
         gap = best - scores[1][0] if len(scores) > 1 else 2
         ident = None
-        if best >= self.threshold and gap >= self.margin:
+        if best >= threshold and gap >= margin:
             ident = scores[0][1]
             voice = self.voices[ident]
-            if clean and learn and not voice["name"]:
+            if clean and learn and seconds >= 2 and not voice["confirmed"]:
+                if min(float(vector @ sample) for sample in voice["samples"]) < 0.80:
+                    return None
                 voice["samples"].append(vector)
                 voice["samples"] = voice["samples"][-12:]
                 voice["clean_seconds"] = voice.get("clean_seconds", 0) + len(audio) / RATE
-                voice["confirmed"] = len(voice["samples"]) >= 2 and voice["clean_seconds"] >= 3
-        elif clean and learn and len(audio) >= RATE and best < self.threshold - self.margin:
-            ident = self.next_id
-            self.next_id += 1
+                voice["confirmed"] = len(voice["samples"]) >= 3 and voice["clean_seconds"] >= 9
+                if voice["confirmed"]:
+                    del self.voices[ident]
+                    ident = self.next_id
+                    self.next_id += 1
+                    self.voices[ident] = voice
+        elif clean and learn and seconds >= 2 and best < 0.40:
+            # Negative IDs are private candidates; public numbers are allocated
+            # only on confirmation. Bound uncertain evidence in busy rooms.
+            pending = [i for i, v in self.voices.items() if not v["confirmed"]]
+            if len(pending) >= 32:
+                del self.voices[pending[0]]
+            ident = min([0, *self.voices]) - 1
             self.voices[ident] = {"name": "", "samples": [vector], "confirmed": False,
                                   "clean_seconds": len(audio) / RATE}
         if ident is None:
             return None
         voice = self.voices[ident]
+        if not voice["confirmed"] and not include_pending:
+            return None
         return {"id": ident, "name": voice["name"], "similarity": round(best, 3) if best >= 0 else None,
                 "confirmed": voice["confirmed"], "uncertain": not voice["confirmed"], "new": best < self.threshold}
 
@@ -161,7 +184,7 @@ class SpeakerRegistry:
 
     def summary(self):
         return [{"id": i, "name": v["name"], "clips": len(v["samples"]), "confirmed": v["confirmed"]}
-                for i, v in self.voices.items()]
+                for i, v in self.voices.items() if v["confirmed"]]
 
 
 def partition_turns(turns, duration):
@@ -194,7 +217,7 @@ class LocalModels:
         self.error = ""
         self.stage = "idle"
         self.settings_path = self.root / "speaker_settings.json"
-        self.settings = {"enabled": True, "recover_overlap": True, "token": ""}
+        self.settings = {"enabled": True, "recover_overlap": True, "track_overlap": False, "token": ""}
         if self.settings_path.exists():
             self.settings.update(json.loads(self.settings_path.read_text(encoding="utf-8")))
         self.settings["token"] = os.environ.get("HF_TOKEN", self.settings["token"])
@@ -204,12 +227,13 @@ class LocalModels:
         return {"state": self.state, "error": self.error, "model": MODEL, "device": self.device,
                 "stage": self.stage,
                 "enabled": self.settings["enabled"], "recover_overlap": self.settings["recover_overlap"],
+                "track_overlap": self.settings["track_overlap"],
                 "token_set": bool(self.settings["token"])}
 
     def configure(self, values):
         with self.lock:
             updated = dict(self.settings)
-            for key in ("enabled", "recover_overlap"):
+            for key in ("enabled", "recover_overlap", "track_overlap"):
                 if key in values:
                     if not isinstance(values[key], bool):
                         raise ValueError(f"{key} must be true or false")
@@ -313,15 +337,86 @@ class LocalModels:
             return [x[:len(audio)] for x in sources]
 
 
+class OverlapTrackMemory:
+    """Experimental source continuity, separate from trusted speaker identity.
+
+    Never enrolls a speaker, passes a filter, or changes a saved voice. A
+    public track needs agreement across three distinct clips. Ambiguous and
+    duplicated simultaneous sources contribute no evidence.
+    """
+    def __init__(self, embed):
+        self.embed = embed
+        self.tracks = []
+        self.next_id = 1
+        self.session = uuid.uuid4().hex[:12]
+
+    def observe(self, sources, tick, learn=True):
+        if learn:
+            self.tracks = [t for t in self.tracks if t['id'] is not None or tick - (t['tick'] or 0) <= 20]
+        vectors = []
+        for source in sources:
+            vector = None
+            if len(source) >= 2 * RATE and np.isfinite(source).all() and np.mean(source ** 2) > 1e-8:
+                middle = len(source) // 2
+                a = SpeakerRegistry.normalize(self.embed(source[:middle]))
+                b = SpeakerRegistry.normalize(self.embed(source[middle:]))
+                if float(a @ b) >= 0.80:
+                    vector = SpeakerRegistry.normalize(a + b)
+            vectors.append(vector)
+        invalid = set()
+        for i, a in enumerate(vectors):
+            for j in range(i):
+                b = vectors[j]
+                if a is not None and b is not None and float(a @ b) >= 0.70:
+                    invalid.update((i, j))
+        proposals = []
+        for i, vector in enumerate(vectors):
+            if vector is None or i in invalid:
+                proposals.append((None, False))
+                continue
+            ranked = sorted([(float(vector @ t['anchor']), n) for n, t in enumerate(self.tracks)], reverse=True)
+            if ranked and ranked[0][0] >= 0.82 and (len(ranked) == 1 or ranked[0][0] - ranked[1][0] >= 0.15):
+                proposals.append((ranked[0][1], False))
+            else:
+                proposals.append((None, not ranked or ranked[0][0] < 0.40))
+        used = [n for n, _ in proposals if n is not None]
+        result = []
+        for i, (n, novel) in enumerate(proposals):
+            if n is not None and used.count(n) > 1:
+                result.append(None)
+                continue
+            if n is None and novel and learn and len(self.tracks) < 64:
+                n = len(self.tracks)
+                self.tracks.append({'anchor': vectors[i], 'clips': 0, 'seconds': 0., 'tick': None, 'id': None})
+            if n is None:
+                result.append(None)
+                continue
+            track = self.tracks[n]
+            if learn and track['tick'] != tick:
+                track['clips'] += 1
+                track['seconds'] += min(len(sources[i]) / RATE, 4.)
+                track['tick'] = tick
+                if track['id'] is None and track['clips'] >= 3 and track['seconds'] >= 6:
+                    track['id'] = self.next_id
+                    self.next_id += 1
+            result.append(None if track['id'] is None else {
+                'id': f"{self.session}-{track['id']}", 'label': f"Voice track {track['id']}",
+                'verified': False})
+        return result
+
+
 class SpeakerAnalyzer:
     def __init__(self, models, registry, transcribe):
         self.models = models
         self.registry = registry
         self.transcribe = transcribe
+        self.overlap_memory = OverlapTrackMemory(registry.embed)
+        self.clip_tick = 0
 
     def analyze(self, audio, language=None, *, learn=True, learn_after=0., learn_before=None):
         """Transcribe once normally; extra ASR is restricted to recoverable overlap."""
         duration = len(audio) / RATE
+        self.clip_tick += 1
         words, detected = self.transcribe(audio, language)
         if self.models.state != "ready":
             return self.result([self.segment(w["start"], w["end"], w["text"], None, False, "unavailable")
@@ -338,8 +433,13 @@ class SpeakerAnalyzer:
             upper = duration if learn_before is None else learn_before
             eligible = [audio[int(max(a, learn_after) * RATE):int(min(b, upper) * RATE)]
                         for a, b, active in spans
-                        if active == (label,) and min(b, upper) > max(a, learn_after)]
-            clean_audio[label] = np.concatenate(eligible) if eligible else np.zeros(0, dtype=np.float32)
+                        if active == (label,) and min(b, upper) - max(a, learn_after) >= 2.0
+                        and sum(1 for w in words if w["text"].strip()
+                                and w["start"] >= max(a, learn_after)
+                                and w["end"] <= min(b, upper)) >= 3]
+            # Use the longest uninterrupted solo stretch for learning; scattered
+            # syllables between other voices are not enrollment evidence.
+            clean_audio[label] = max(eligible, key=len) if eligible else np.zeros(0, dtype=np.float32)
         # Distinct local speakers must not map to the same persistent identity.
         ids = [m["id"] for m in matches.values() if m]
         duplicated = {i for i in ids if ids.count(i) > 1}
@@ -350,7 +450,7 @@ class SpeakerAnalyzer:
             for label in labels:
                 if duplicated:
                     continue
-                learned = self.registry.identify(clean_audio[label], learn=True, clean=True)
+                learned = self.registry.identify(clean_audio[label], learn=True, clean=True, include_pending=True)
                 if learned:
                     matches[label] = learned
         ids = [m["id"] for m in matches.values() if m]
@@ -378,21 +478,30 @@ class SpeakerAnalyzer:
                     allowed = {i for i, v in self.registry.voices.items() if v["confirmed"]}
                     if not match or not match["confirmed"] or match["id"] not in allowed:
                         match = None
-                    recovered_words, _ = self.transcribe(source, language or detected)
+                    # Different conversations may use different languages.
+                    recovered_words, source_language = self.transcribe(source, language)
                     if not recovered_words:
                         break
-                    candidates.append((match, recovered_words))
+                    candidates.append((match, recovered_words, source_language))
                 if len(candidates) == len(active):
-                    identities = [m["id"] for m, _ in candidates if m]
+                    identities = [m["id"] for m, _, _ in candidates if m]
                     duplicates = {i for i in identities if identities.count(i) > 1}
+                    try:
+                        tracks = (self.overlap_memory.observe(sources, self.clip_tick,
+                            learn=learn and learn_after == 0 and learn_before is None)
+                            if self.models.settings.get("track_overlap", False) else [None] * len(sources))
+                    except Exception:
+                        tracks = [None] * len(sources)
                     recovered.append((a, b))
-                    for track, (match, entries) in enumerate(candidates):
+                    for track, (match, entries, source_language) in enumerate(candidates):
                         if match and match["id"] in duplicates:
                             match = None
                         for word in entries:
                             item = self.segment(a + word["start"], min(b, a + word["end"]),
                                                 word["text"], match, True, "separated")
                             item["track"] = f"overlap-{a:.3f}-{track}"
+                            item["voice_track"] = tracks[track] if match is None else None
+                            item["language"] = source_language
                             segments.append(item)
         for word in words:
             a, b = word["start"], word["end"]
@@ -412,6 +521,10 @@ class SpeakerAnalyzer:
 
     @staticmethod
     def segment(start, end, text, speaker, overlapping, source):
+        if speaker and not speaker["confirmed"]:
+            speaker = None
+            if source == "clean":
+                source = "unknown"
         return {"start": round(start, 3), "end": round(end, 3), "text": text,
                 "speaker": speaker, "overlapping": overlapping, "source": source,
                 "accepted": bool(speaker and speaker["confirmed"] and source == "clean")}

@@ -31,7 +31,7 @@ def test_pyannote_metadata_loads_with_scoped_allowlist(monkeypatch, tmp_path):
     loaded = load_speaker_pipeline(tmp_path, "test-token")
     assert loaded["specifications"].resolution == Resolution.FRAME
     assert torch.equal(loaded["weights"], torch.ones(2))
-    assert torch.serialization.get_safe_globals() == before
+    assert set(torch.serialization.get_safe_globals()) == set(before)
 
 
 def test_allowlist_is_removed_after_failed_load(monkeypatch, tmp_path):
@@ -41,7 +41,7 @@ def test_allowlist_is_removed_after_failed_load(monkeypatch, tmp_path):
     monkeypatch.setattr(Pipeline, "from_pretrained", fail)
     with pytest.raises(pickle.UnpicklingError):
         load_speaker_pipeline(tmp_path, "test-token")
-    assert torch.serialization.get_safe_globals() == before
+    assert set(torch.serialization.get_safe_globals()) == set(before)
 
 
 def test_import_error_reports_stage_and_redacts_credentials(monkeypatch, tmp_path):

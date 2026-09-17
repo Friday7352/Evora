@@ -9,6 +9,7 @@ button{background:#a8dbc9;border:0;border-radius:6px;padding:12px 18px;cursor:po
 a{color:#a8dbc9}label{display:block;margin:12px 0}small{color:#b6c6d1}#message{white-space:pre-wrap}li{margin:12px 0}li button{margin-left:16px;padding:4px 12px}
 </style>
 <h1>Speaker settings</h1>
+<p>Random voices receive a speaker label only after at least three consistent samples totaling nine seconds of clear solo speech. Short clips and overlapping speech do not create profiles. Uncertain matches stay unidentified.</p>
 <p>Keep track of individual voices and leave uncertain speech unassigned. Audio is processed on the Evora computer, even when you open this page from another PC on your private network.</p>
 <section><h2>Prepare speaker recognition</h2>
 <p>One-time setup: accept the conditions for <a href="https://huggingface.co/pyannote/speaker-diarization-community-1" target="_blank" rel="noreferrer">Community-1</a>, then create a <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noreferrer">Hugging Face read token</a> with access to that model.</p>
@@ -16,6 +17,8 @@ a{color:#a8dbc9}label{display:block;margin:12px 0}small{color:#b6c6d1}#message{w
 <small>The token is stored on the Evora computer for model downloads. It is never returned by this page. Use this page only on your trusted private network.</small>
 <label><input id="enabled" type="checkbox" checked> Enable speaker recognition</label>
 <label><input id="recover" type="checkbox"> Recover two or three overlapping voices (experimental; adds delay)</label>
+<label><input id="trackOverlap" type="checkbox"> Follow repeated separated voices (experimental)</label>
+<small>Unverified voice tracks may persist across clips without solo speech. They are not confirmed people and cannot pass speaker filters. Current separation attempts at most three simultaneous voices; crowded worlds can remain unidentified.</small>
 <small>Recovered overlap is displayed as uncertain and excluded from speaker filtering. Recognition cannot guarantee every word or identity.</small>
 <p><button id="save">Save and prepare models</button></p><p id="status" role="status"></p></section>
 <section><h2>Remember a voice</h2><p>Upload 20–30 seconds of one person speaking clearly alone (minimum 3 seconds). Several voice samples are saved for that person. Saved voices survive restarts; unfamiliar voices are learned temporarily in each Frivo listening session.</p>
@@ -27,9 +30,9 @@ a{color:#a8dbc9}label{display:block;margin:12px 0}small{color:#b6c6d1}#message{w
 const nonce={{ nonce|tojson }};
 const $=id=>document.getElementById(id);
 async function call(url,options={}){const r=await fetch(url,options);const j=await r.json();if(!r.ok)throw Error(j.error||'Request failed');return j;}
-async function refresh(initial=false){try{const s=await call('/speaker-status');$('status').textContent=`Speaker model: ${s.state.replaceAll('_',' ')}. ${s.error||''}`;if(initial){$('enabled').checked=s.enabled;$('recover').checked=s.recover_overlap;}$('save').disabled=s.state==='loading';const v=await call('/speakers');$('voices').replaceChildren();for(const speaker of v.speakers.filter(x=>x.name)){const li=document.createElement('li');li.append(document.createTextNode(speaker.name));const b=document.createElement('button');b.textContent='Forget';b.onclick=()=>action(async()=>{await call(`/speakers/${speaker.id}`,{method:'DELETE',headers:{'X-Evora-Settings':nonce}});await refresh();});li.append(b);$('voices').append(li);}}catch(e){$('status').textContent=e.message;}}
+async function refresh(initial=false){try{const s=await call('/speaker-status');$('status').textContent=`Speaker model: ${s.state.replaceAll('_',' ')}. ${s.error||''}`;if(initial){$('enabled').checked=s.enabled;$('recover').checked=s.recover_overlap;$('trackOverlap').checked=Boolean(s.track_overlap);}$('save').disabled=s.state==='loading';const v=await call('/speakers');$('voices').replaceChildren();for(const speaker of v.speakers.filter(x=>x.name)){const li=document.createElement('li');li.append(document.createTextNode(speaker.name));const b=document.createElement('button');b.textContent='Forget';b.onclick=()=>action(async()=>{await call(`/speakers/${speaker.id}`,{method:'DELETE',headers:{'X-Evora-Settings':nonce}});await refresh();});li.append(b);$('voices').append(li);}}catch(e){$('status').textContent=e.message;}}
 async function action(fn){try{$('message').textContent='Working…';await fn();$('message').textContent='Saved.';}catch(e){$('message').textContent=e.message;}}
-$('save').onclick=()=>action(async()=>{await call('/speaker-settings',{method:'POST',headers:{'Content-Type':'application/json','X-Evora-Settings':nonce},body:JSON.stringify({token:$('token').value,enabled:$('enabled').checked,recover_overlap:$('recover').checked})});$('token').value='';await refresh();});
+$('save').onclick=()=>action(async()=>{await call('/speaker-settings',{method:'POST',headers:{'Content-Type':'application/json','X-Evora-Settings':nonce},body:JSON.stringify({token:$('token').value,enabled:$('enabled').checked,recover_overlap:$('recover').checked,track_overlap:$('trackOverlap').checked})});$('token').value='';await refresh();});
 $('enroll').onclick=()=>action(async()=>{if(!$('audio').files[0])throw Error('Choose a voice recording.');const f=new FormData();f.append('file',$('audio').files[0]);f.append('name',$('name').value);await call('/speakers/enroll',{method:'POST',headers:{'X-Evora-Settings':nonce},body:f});await refresh();});
 refresh(true);setInterval(refresh,4000);
 </script></html>

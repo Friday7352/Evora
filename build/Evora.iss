@@ -52,6 +52,7 @@ Source: "..\templates\speaker_settings.html"; DestDir: "{tmp}\EvoraSetupPayload\
 Source: "..\docs\speaker-api.md"; DestDir: "{tmp}\EvoraSetupPayload\docs"; Flags: ignoreversion deleteafterinstall
 Source: "..\docs\RELEASE-1.1.0.md"; DestDir: "{tmp}\EvoraSetupPayload\docs"; Flags: ignoreversion deleteafterinstall
 Source: "..\docs\RELEASE-1.2.0.md"; DestDir: "{tmp}\EvoraSetupPayload\docs"; Flags: ignoreversion deleteafterinstall
+Source: "..\docs\RELEASE-1.3.0.md"; DestDir: "{tmp}\EvoraSetupPayload\docs"; Flags: ignoreversion deleteafterinstall
 
 [Run]
 Filename: "{tmp}\EvoraSetupPayload\EvoraSetupHost.exe"; Parameters: "--script ""{tmp}\EvoraSetupPayload\Evora-Setup.ps1"""; Flags: waituntilterminated hidewizard 64bit
