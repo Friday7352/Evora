@@ -4,6 +4,17 @@ Evora Third-Party Notices
 Evora installs and uses open-source software. The notices below are included
 with Evora for the components noted here.
 
+Optional joint separation
+-------------------------
+PixIT / ToTaToNet model and pipeline: pyannote, MIT.
+https://huggingface.co/pyannote/speech-separation-ami-1.0
+https://huggingface.co/pyannote/separation-ami-1.0
+Model access conditions must be accepted separately; weights are not bundled.
+WavLM and Transformers retain their upstream licenses in the model cache and
+installed Python packages. Transformers: Apache License 2.0.
+Asteroid inference subset is bundled under vendor/asteroid_inference. See its
+LICENSE, NOTICE.md and in-source attributions for the upstream terms and changes.
+
 Speaker analysis dependencies and downloaded models
 --------------------------------------------------
 pyannote.audio: MIT, Copyright (c) 2021-2025 CNRS and 2025- pyannoteAI.

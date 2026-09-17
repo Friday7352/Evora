@@ -1,38 +1,51 @@
 <!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Evora · Speaker settings</title>
+<title>Evora · Voice setup</title>
 <style>
-body{font:16px/1.6 system-ui;background:#111820;color:#e8eef3;max-width:720px;margin:48px auto;padding:0 24px}
-h1{font-size:30px}section{background:#1b2631;border:1px solid #334454;border-radius:14px;padding:24px;margin:20px 0}
-input[type=password],input[type=text]{box-sizing:border-box;width:100%;padding:12px;margin:8px 0 16px;background:#111820;color:inherit;border:1px solid #536779;border-radius:6px}
-button{background:#a8dbc9;border:0;border-radius:6px;padding:12px 18px;cursor:pointer;font:inherit}button:disabled{opacity:.5}
-a{color:#a8dbc9}label{display:block;margin:12px 0}small{color:#b6c6d1}#message{white-space:pre-wrap}li{margin:12px 0}li button{margin-left:16px;padding:4px 12px}
+:root{color-scheme:dark}body{font:16px/1.6 system-ui;background:#111820;color:#e8eef3;max-width:800px;margin:40px auto;padding:0 22px}h1{font-size:30px}h2{font-size:21px;margin-top:0}section{background:#1b2631;border:1px solid #334454;border-radius:14px;padding:24px;margin:20px 0}input[type=password],input[type=text],select{box-sizing:border-box;width:100%;padding:12px;margin:8px 0;background:#111820;color:inherit;border:1px solid #536779;border-radius:6px}button{background:#a8dbc9;color:#10251e;border:0;border-radius:6px;padding:12px 18px;cursor:pointer;font:inherit}button:disabled{opacity:.5;cursor:wait}a{color:#a8dbc9}label{display:block;margin:12px 0}small,.muted{color:#b6c6d1}.pill{display:inline-block;border:1px solid #536779;border-radius:20px;padding:3px 12px}#message,#status{white-space:pre-wrap}li{margin:12px 0}li button{margin-left:16px;padding:4px 12px}audio{display:block;width:100%;margin-top:8px}.preview{padding:12px 0;border-top:1px solid #334454}summary{cursor:pointer}progress{width:100%;accent-color:#a8dbc9}[hidden]{display:none!important}#transcript{max-height:360px;overflow:auto}.line{padding:8px 0;border-bottom:1px solid #334454}
 </style>
-<h1>Speaker settings</h1>
-<p>Random voices receive a speaker label only after at least three consistent samples totaling nine seconds of clear solo speech. Short clips and overlapping speech do not create profiles. Uncertain matches stay unidentified.</p>
-<p>Keep track of individual voices and leave uncertain speech unassigned. Audio is processed on the Evora computer, even when you open this page from another PC on your private network.</p>
-<section><h2>Prepare speaker recognition</h2>
-<p>One-time setup: accept the conditions for <a href="https://huggingface.co/pyannote/speaker-diarization-community-1" target="_blank" rel="noreferrer">Community-1</a>, then create a <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noreferrer">Hugging Face read token</a> with access to that model.</p>
-<label>Read token<input id="token" type="password" autocomplete="off" placeholder="Leave blank to keep the saved token"></label>
-<small>The token is stored on the Evora computer for model downloads. It is never returned by this page. Use this page only on your trusted private network.</small>
-<label><input id="enabled" type="checkbox" checked> Enable speaker recognition</label>
-<label><input id="recover" type="checkbox"> Recover two or three overlapping voices (experimental; adds delay)</label>
-<label><input id="trackOverlap" type="checkbox"> Follow repeated separated voices (experimental)</label>
-<small>Unverified voice tracks may persist across clips without solo speech. They are not confirmed people and cannot pass speaker filters. Current separation attempts at most three simultaneous voices; crowded worlds can remain unidentified.</small>
-<small>Recovered overlap is displayed as uncertain and excluded from speaker filtering. Recognition cannot guarantee every word or identity.</small>
-<p><button id="save">Save and prepare models</button></p><p id="status" role="status"></p></section>
-<section><h2>Remember a voice</h2><p>Upload 20–30 seconds of one person speaking clearly alone (minimum 3 seconds). Several voice samples are saved for that person. Saved voices survive restarts; unfamiliar voices are learned temporarily in each Frivo listening session.</p>
-<label>Speaker name<input id="name" type="text" maxlength="80"></label>
-<label>Voice recording <input id="audio" type="file" accept="audio/*"></label>
-<button id="enroll">Save voice</button><ul id="voices"></ul></section>
-<p id="message" role="status"></p><p><a href="/">Service status</a></p>
+<h1>Voice setup</h1>
+<p>Set up voices on the Evora computer. You can use this page from either PC on your home network.</p>
+<p class="pill" id="device">Checking Evora…</p>
+<section><h2>1. Choose how to follow voices</h2>
+<label for="engine">Speaker mode</label><select id="engine"><option value="community">Standard · existing speaker recognition</option><option value="pixit">Joint voice separation · preview</option></select>
+<p id="modeHelp"></p>
+<p class="muted">Joint separation is a candidate to test, not a verified accuracy upgrade. It attempts up to three voices in each short model window. Four to six people speaking together can still remain mixed. Temporary “Voice” labels are estimates and are not accepted by strict speaker filters.</p>
+<label><input id="enabled" type="checkbox" checked> Follow speakers while listening</label>
+<details id="advanced"><summary>Standard mode options</summary><label><input id="recover" type="checkbox"> Attempt overlap recovery</label><label><input id="trackOverlap" type="checkbox"> Follow repeated separated tracks (experimental)</label></details>
+</section>
+<section><h2>2. Download the voice model</h2>
+<p>Hugging Face hosts the model files. Its free account gives Evora permission to download them. Your conversations are processed locally on your Evora PC.</p>
+<ol><li>Sign in to Hugging Face and accept access on the model page<span id="plural"></span> below.</li><li>If you already saved a read token in Evora, leave the token box blank. A fine-grained token must also allow access to the new models.</li><li>Click <strong>Prepare voices</strong>. Evora downloads the files and checks that the model can run.</li></ol>
+<p id="standardLinks"><a href="https://huggingface.co/pyannote/speaker-diarization-community-1" target="_blank" rel="noreferrer">Open Community-1 access page ↗</a></p>
+<div id="jointLinks" hidden><p><a href="https://huggingface.co/pyannote/separation-ami-1.0" target="_blank" rel="noreferrer">Open voice model access page ↗</a></p><p><a href="https://huggingface.co/pyannote/speech-separation-ami-1.0" target="_blank" rel="noreferrer">Open separation pipeline access page ↗</a></p><p>Accept both pages using the same account as your token. These are separate from Community-1.</p></div>
+<label>Hugging Face read token<input id="token" type="password" autocomplete="off" placeholder="Leave blank to keep your saved token"></label>
+<small id="tokenState"></small>
+<details><summary>I do not have a token yet</summary><p>Open <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noreferrer">Hugging Face tokens ↗</a>, create a Read token, and paste it into the box above. Never share it in chat. Evora saves it only on the Evora computer and never returns it from this page.</p></details>
+<p><button id="save">Prepare voices</button></p><p id="status" role="status"></p><p id="notice" class="muted"></p>
+</section>
+<section><h2>3. Try a recording first</h2>
+<p>Stop listening in Frivo, then choose a recording of up to one minute (256 MB maximum). Audio or video works. This checks speed and lets you hear the separated voices before relying on them live.</p>
+<label>Conversation recording<input id="testAudio" type="file" accept="audio/*,video/*,.mkv"></label><button id="test">Test this recording</button><p id="checkStatus" role="status"></p><progress id="progress" max="100" value="0" hidden></progress>
+<div id="previews"></div><div id="transcript"></div>
+<small>The test does not change saved voices or live sessions. Preview audio is held temporarily in memory. A speed result is not an accuracy score: listen for the same person staying on the same label and other voices leaking into their audio.</small>
+</section>
+<section><h2>Remember someone you know</h2><p>Choose 20–30 seconds of that person speaking alone and enter their name. Named voices survive restarts. Temporary voices belong only to the current listening session.</p><label>Speaker name<input id="name" type="text" maxlength="80"></label><label>Voice recording<input id="audio" type="file" accept="audio/*,video/*,.mkv"></label><button id="enroll">Save this voice</button><ul id="voices"></ul></section>
+<p id="message" role="status"></p><p>After changing speaker mode, stop and restart listening in Frivo.</p><p><a href="/">Evora service status</a></p>
 <script>
 const nonce={{ nonce|tojson }};
-const $=id=>document.getElementById(id);
-async function call(url,options={}){const r=await fetch(url,options);const j=await r.json();if(!r.ok)throw Error(j.error||'Request failed');return j;}
-async function refresh(initial=false){try{const s=await call('/speaker-status');$('status').textContent=`Speaker model: ${s.state.replaceAll('_',' ')}. ${s.error||''}`;if(initial){$('enabled').checked=s.enabled;$('recover').checked=s.recover_overlap;$('trackOverlap').checked=Boolean(s.track_overlap);}$('save').disabled=s.state==='loading';const v=await call('/speakers');$('voices').replaceChildren();for(const speaker of v.speakers.filter(x=>x.name)){const li=document.createElement('li');li.append(document.createTextNode(speaker.name));const b=document.createElement('button');b.textContent='Forget';b.onclick=()=>action(async()=>{await call(`/speakers/${speaker.id}`,{method:'DELETE',headers:{'X-Evora-Settings':nonce}});await refresh();});li.append(b);$('voices').append(li);}}catch(e){$('status').textContent=e.message;}}
-async function action(fn){try{$('message').textContent='Working…';await fn();$('message').textContent='Saved.';}catch(e){$('message').textContent=e.message;}}
-$('save').onclick=()=>action(async()=>{await call('/speaker-settings',{method:'POST',headers:{'Content-Type':'application/json','X-Evora-Settings':nonce},body:JSON.stringify({token:$('token').value,enabled:$('enabled').checked,recover_overlap:$('recover').checked,track_overlap:$('trackOverlap').checked})});$('token').value='';await refresh();});
-$('enroll').onclick=()=>action(async()=>{if(!$('audio').files[0])throw Error('Choose a voice recording.');const f=new FormData();f.append('file',$('audio').files[0]);f.append('name',$('name').value);await call('/speakers/enroll',{method:'POST',headers:{'X-Evora-Settings':nonce},body:f});await refresh();});
-refresh(true);setInterval(refresh,4000);
+const $=id=>document.getElementById(id), urls=[];
+let checkRunning=false, renderedCheck=null, busy=false, modelReady=false;
+const headers={'X-Evora-Settings':nonce};
+async function call(url,options={}){const r=await fetch(url,options);let j;try{j=await r.json();}catch{throw Error(r.status===413?'Recording is too large. Choose a file under 256 MB.':'Evora could not answer. Check that it is running.');}if(!r.ok)throw Error(j.error||'Request failed');return j;}
+function modeHelp(){const joint=$('engine').value==='pixit';$('jointLinks').hidden=!joint;$('standardLinks').hidden=joint;$('advanced').hidden=joint;$('plural').textContent=joint?'s':'';$('modeHelp').textContent=joint?'Separates audio and assigns speaker activity together, then follows estimated voices across listening clips. Needs extra downloads; test its speed and quality below.':'Uses the current speaker model. Random identities require clear, consistent solo speech, so crowded conversations may stay unidentified.';}
+$('engine').onchange=modeHelp;
+function controls(){for(const id of ['save','enroll','engine','test'])$(id).disabled=busy||checkRunning||((id==='enroll'||id==='test')&&!modelReady);}
+async function refresh(initial=false){try{const s=await call('/speaker-status');modelReady=s.state==='ready';busy=s.state==='loading';$('device').textContent=s.device==='cuda'?'Processing on NVIDIA GPU':'Processing on CPU';$('status').textContent=s.state==='loading'?`Preparing: ${s.stage}…`:s.state==='ready'?'Model loaded. Run a recording test to check speed and separation.':`Speaker model: ${s.state.replaceAll('_',' ')}. ${s.error||''}`;$('notice').textContent=s.notice||'';$('tokenState').textContent=s.token_set?'A token is already saved on this Evora computer.':'No token saved yet.';if(initial){$('engine').value=s.engine||'community';$('enabled').checked=s.enabled;$('recover').checked=s.recover_overlap;$('trackOverlap').checked=Boolean(s.track_overlap);modeHelp();}controls();if(!busy&&!checkRunning){const v=await call('/speakers');$('voices').replaceChildren();for(const speaker of v.speakers.filter(x=>x.name)){const li=document.createElement('li');li.append(document.createTextNode(speaker.name));const b=document.createElement('button');b.textContent='Forget';b.onclick=()=>action(async()=>{await call(`/speakers/${speaker.id}`,{method:'DELETE',headers});await refresh();});li.append(b);$('voices').append(li);}}}catch(e){$('message').textContent=e.message;}}
+async function action(fn){try{$('message').textContent='Working…';await fn();$('message').textContent='';}catch(e){$('message').textContent=e.message;}}
+$('save').onclick=()=>action(async()=>{busy=true;controls();try{await call('/speaker-settings',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({engine:$('engine').value,token:$('token').value,enabled:$('enabled').checked,recover_overlap:$('recover').checked,track_overlap:$('trackOverlap').checked})});$('token').value='';}finally{busy=false;await refresh();}});
+$('enroll').onclick=()=>action(async()=>{if(!$('audio').files[0])throw Error('Choose a voice recording.');const f=new FormData();f.append('file',$('audio').files[0]);f.append('name',$('name').value);await call('/speakers/enroll',{method:'POST',headers,body:f});await refresh();});
+$('test').onclick=()=>action(async()=>{if(!$('testAudio').files[0])throw Error('Choose a conversation recording.');for(const url of urls)URL.revokeObjectURL(url);urls.length=0;renderedCheck=null;$('previews').replaceChildren();$('transcript').replaceChildren();const f=new FormData();f.append('file',$('testAudio').files[0]);await call('/speaker-check',{method:'POST',headers,body:f});checkRunning=true;controls();await pollCheck();});
+async function pollCheck(){try{const c=await call('/speaker-check',{headers});checkRunning=c.state==='running';controls();$('progress').hidden=!checkRunning;$('progress').value=c.progress||0;if(checkRunning){$('checkStatus').textContent=`Testing on the Evora computer… ${c.progress||0}%`;return;}if(c.state==='error'){$('checkStatus').textContent=c.error;return;}if(c.state!=='complete'||renderedCheck===c.processing_seconds)return;renderedCheck=c.processing_seconds;$('checkStatus').textContent=`${c.duration}s of audio processed in ${c.processing_seconds}s. ${c.keeps_up?'This test kept up with incoming audio.':'This test was slower than live audio; use Standard mode for lower delay.'} This does not measure speaker accuracy.`;for(const p of c.previews||[]){const div=document.createElement('div');div.className='preview';const label=document.createElement('strong');label.textContent=`${p.label} · ${p.start}–${p.end}s`;const b=document.createElement('button');b.textContent='Listen';b.onclick=()=>action(async()=>{b.disabled=true;try{const r=await fetch('/speaker-check/audio/'+p.id,{headers});if(!r.ok)throw Error('Preview expired. Run the test again.');const url=URL.createObjectURL(await r.blob());urls.push(url);const audio=document.createElement('audio');audio.controls=true;audio.src=url;div.append(audio);b.remove();await audio.play();}finally{b.disabled=false;}});div.append(label,document.createTextNode(' '),b);$('previews').append(div);}for(const s of c.segments||[]){const row=document.createElement('div');row.className='line';row.textContent=`${s.start.toFixed(1)}s · ${s.speaker?.name||s.voice_track?.label||(s.speaker?'Speaker '+s.speaker.id:'Unidentified')} — ${s.text}`;$('transcript').append(row);}}catch(e){$('checkStatus').textContent=e.message;}}
+refresh(true);pollCheck();setInterval(()=>{refresh();if(checkRunning)pollCheck();},3000);
 </script></html>

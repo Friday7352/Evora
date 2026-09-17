@@ -48,11 +48,14 @@ Source: "..\requirements.txt";        DestDir: "{tmp}\EvoraSetupPayload"; Flags:
 Source: "..\VERSION";                 DestDir: "{tmp}\EvoraSetupPayload"; Flags: ignoreversion deleteafterinstall
 Source: "..\evora_speakers.py";        DestDir: "{tmp}\EvoraSetupPayload"; Flags: ignoreversion deleteafterinstall
 Source: "..\evora_api.py";             DestDir: "{tmp}\EvoraSetupPayload"; Flags: ignoreversion deleteafterinstall
+Source: "..\evora_joint.py";           DestDir: "{tmp}\EvoraSetupPayload"; Flags: ignoreversion deleteafterinstall
+Source: "..\vendor\*"; DestDir: "{tmp}\EvoraSetupPayload\vendor"; Excludes: "__pycache__\*,*.pyc"; Flags: ignoreversion deleteafterinstall recursesubdirs createallsubdirs
 Source: "..\templates\speaker_settings.html"; DestDir: "{tmp}\EvoraSetupPayload\templates"; Flags: ignoreversion deleteafterinstall
 Source: "..\docs\speaker-api.md"; DestDir: "{tmp}\EvoraSetupPayload\docs"; Flags: ignoreversion deleteafterinstall
 Source: "..\docs\RELEASE-1.1.0.md"; DestDir: "{tmp}\EvoraSetupPayload\docs"; Flags: ignoreversion deleteafterinstall
 Source: "..\docs\RELEASE-1.2.0.md"; DestDir: "{tmp}\EvoraSetupPayload\docs"; Flags: ignoreversion deleteafterinstall
 Source: "..\docs\RELEASE-1.3.0.md"; DestDir: "{tmp}\EvoraSetupPayload\docs"; Flags: ignoreversion deleteafterinstall
+Source: "..\docs\RELEASE-1.4.0.md"; DestDir: "{tmp}\EvoraSetupPayload\docs"; Flags: ignoreversion deleteafterinstall
 
 [Run]
 Filename: "{tmp}\EvoraSetupPayload\EvoraSetupHost.exe"; Parameters: "--script ""{tmp}\EvoraSetupPayload\Evora-Setup.ps1"""; Flags: waituntilterminated hidewizard 64bit

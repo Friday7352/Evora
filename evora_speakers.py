@@ -11,6 +11,7 @@ import re
 import traceback
 import sys
 from pathlib import Path
+from evora_joint import JOINT_MODEL, JointConversation, analyze_joint, load_joint_pipeline, unpack_joint_result
 
 import numpy as np
 
@@ -217,14 +218,16 @@ class LocalModels:
         self.error = ""
         self.stage = "idle"
         self.settings_path = self.root / "speaker_settings.json"
-        self.settings = {"enabled": True, "recover_overlap": True, "track_overlap": False, "token": ""}
+        self.settings = {"enabled": True, "recover_overlap": True, "track_overlap": False, "token": "", "engine": "community"}
         if self.settings_path.exists():
             self.settings.update(json.loads(self.settings_path.read_text(encoding="utf-8")))
         self.settings["token"] = os.environ.get("HF_TOKEN", self.settings["token"])
         os.environ.setdefault("PYANNOTE_METRICS_ENABLED", "0")
+        self.notice = ""
 
     def status(self):
-        return {"state": self.state, "error": self.error, "model": MODEL, "device": self.device,
+        return {"state": self.state, "error": self.error, "model": JOINT_MODEL if self.settings["engine"] == "pixit" else MODEL, "device": self.device,
+                "engine": self.settings["engine"], "notice": self.notice,
                 "stage": self.stage,
                 "enabled": self.settings["enabled"], "recover_overlap": self.settings["recover_overlap"],
                 "track_overlap": self.settings["track_overlap"],
@@ -233,6 +236,10 @@ class LocalModels:
     def configure(self, values):
         with self.lock:
             updated = dict(self.settings)
+            if "engine" in values:
+                if values["engine"] not in ("community", "pixit"):
+                    raise ValueError("Choose a supported speaker mode")
+                updated["engine"] = values["engine"]
             for key in ("enabled", "recover_overlap", "track_overlap"):
                 if key in values:
                     if not isinstance(values[key], bool):
@@ -247,6 +254,7 @@ class LocalModels:
             self.pipeline = None
             self.separator = None
             self.error = ""
+            self.notice = ""
             self.state = "not_configured"
         self.prepare()
 
@@ -267,11 +275,17 @@ class LocalModels:
             try:
                 self.stage = "loading speaker detection"
                 import torch
-                pipeline = load_speaker_pipeline(self.root / "model_cache", self.settings["token"])
+                if self.device == "cuda":
+                    torch.cuda.empty_cache()
+                if self.settings["engine"] == "pixit":
+                    self.stage = "downloading joint voice separation"
+                    pipeline = load_joint_pipeline(self.root / "model_cache", self.settings["token"])
+                else:
+                    pipeline = load_speaker_pipeline(self.root / "model_cache", self.settings["token"])
                 self.stage = "moving speaker detection to " + self.device
                 pipeline.to(torch.device(self.device))
                 self.pipeline = pipeline
-                if self.settings["recover_overlap"]:
+                if self.settings["recover_overlap"] and self.settings["engine"] != "pixit":
                     self.stage = "loading overlap recovery"
                     from speechbrain.inference.separation import SepformerSeparation
                     from speechbrain.utils.fetching import LocalStrategy
@@ -282,6 +296,14 @@ class LocalModels:
                 if self.warmup:
                     self.stage = "loading voice recognition"
                     self.warmup()
+                if self.settings["engine"] == "pixit":
+                    self.stage = "checking separation on this computer"
+                    # A forward pass detects missing runtime components, shape
+                    # incompatibilities and GPU allocation failures before Ready.
+                    with torch.inference_mode():
+                        probe = {"waveform": torch.zeros(1, 5 * RATE), "sample_rate": RATE}
+                        unpack_joint_result(pipeline(probe), 5 * RATE)
+                    self.notice = "Joint separation is a preview. Test a recording below before using it live. Up to three voices per model window; crowded speech can remain mixed."
                 self.stage = "ready"
                 self.state = "ready"
             except Exception as exc:
@@ -298,6 +320,10 @@ class LocalModels:
                     self.error = ("Speaker model file could not be read (UnpicklingError). "
                                   "This indicates model compatibility or a damaged download, not necessarily a token problem. "
                                   f"Details while {self.stage}: {details}")
+                elif self.settings["engine"] == "pixit":
+                    self.error = (f"Joint separation could not finish {self.stage}. {details} "
+                                  "If access was denied, accept both model links below and give your read token access to them. "
+                                  "You can switch back to Standard at any time.")
                 else:
                     self.error = (f"Speaker model could not load ({type(exc).__name__}). Accept the model access "
                                   "conditions, check your read token and internet connection, then save settings to retry.")
@@ -309,8 +335,19 @@ class LocalModels:
                 raise RuntimeError("Speaker model is not ready")
             result = self.pipeline({"waveform": torch.from_numpy(audio.copy()).float().unsqueeze(0),
                                     "sample_rate": RATE})
+            if self.settings["engine"] == "pixit":
+                return unpack_joint_result(result, len(audio))[0]
             return [(turn.start, turn.end, speaker)
                     for turn, _, speaker in result.speaker_diarization.itertracks(yield_label=True)]
+
+    def joint(self, audio):
+        import torch
+        with self.lock, torch.inference_mode():
+            if self.state != "ready" or self.settings["engine"] != "pixit":
+                raise RuntimeError("Prepare joint separation first")
+            result = self.pipeline({"waveform": torch.from_numpy(audio.copy()).float().unsqueeze(0),
+                                    "sample_rate": RATE})
+            return unpack_joint_result(result, len(audio))
 
     def separate(self, audio, count=2):
         import torch
@@ -412,10 +449,20 @@ class SpeakerAnalyzer:
         self.transcribe = transcribe
         self.overlap_memory = OverlapTrackMemory(registry.embed)
         self.clip_tick = 0
+        self.joint_conversation = JointConversation()
 
     def analyze(self, audio, language=None, *, learn=True, learn_after=0., learn_before=None):
         """Transcribe once normally; extra ASR is restricted to recoverable overlap."""
         duration = len(audio) / RATE
+        if self.models.state == "ready" and self.models.settings.get("engine") == "pixit":
+            if learn_after != 0 or learn_before is not None:
+                raise ValueError("Joint separation uses listening sessions. Use /v1/audio/transcriptions with listening_session.")
+            try:
+                return analyze_joint(self, audio, language)
+            except Exception as exc:
+                self.models.notice = "Voice separation failed for this clip; showing the mixed transcript without guessed speakers. " + model_error_details(exc, self.models.settings.get("token", ""))
+                words, detected = self.transcribe(audio, language)
+                return self.result([self.segment(w["start"],w["end"],w["text"],None,True,"overlap") for w in words],detected)
         self.clip_tick += 1
         words, detected = self.transcribe(audio, language)
         if self.models.state != "ready":

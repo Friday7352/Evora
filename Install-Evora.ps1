@@ -202,7 +202,7 @@ function Copy-ProgramFiles([string] $Destination) {
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
     $keep = @(
         '.gitattributes', '.gitignore', 'LICENSE', 'README.md', 'THIRD_PARTY_NOTICES.txt', 'requirements.txt',
-        'evora_server.py', 'evora_speakers.py', 'evora_api.py', 'VERSION', 'Install-Evora.ps1', 'Uninstall-Evora.vbs',
+        'evora_server.py', 'evora_speakers.py', 'evora_joint.py', 'evora_api.py', 'VERSION', 'Install-Evora.ps1', 'Uninstall-Evora.vbs',
         'Evora-Uninstall.ps1', 'Evora-Launcher.ps1', 'EvoraHost.exe', 'EvoraSetupHost.exe',
         'Evora.Ui.psm1', 'Evora-Setup.ps1', 'Evora-Setup.vbs', 'Evora.png', 'EvoraIcon.ico'
     )
@@ -215,9 +215,17 @@ function Copy-ProgramFiles([string] $Destination) {
     $templates = Join-Path $Destination 'templates'
     New-Item -ItemType Directory -Path $templates -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $SourceDir 'templates\speaker_settings.html') -Destination $templates -Force
+    $vendorSource = Join-Path $SourceDir 'vendor'
+    foreach ($file in (Get-ChildItem -LiteralPath $vendorSource -Recurse -File)) {
+        if ($file.Extension -notin @('.py', '.md') -and $file.Name -ne 'LICENSE') { continue }
+        $relative = $file.FullName.Substring($vendorSource.Length).TrimStart('\')
+        $vendorTarget = Join-Path (Join-Path $Destination 'vendor') $relative
+        New-Item -ItemType Directory -Path (Split-Path -Parent $vendorTarget) -Force | Out-Null
+        Copy-Item -LiteralPath $file.FullName -Destination $vendorTarget -Force
+    }
     $docs = Join-Path $Destination 'docs'
     New-Item -ItemType Directory -Path $docs -Force | Out-Null
-    foreach ($name in @('speaker-api.md', 'RELEASE-1.1.0.md', 'RELEASE-1.2.0.md', 'RELEASE-1.3.0.md')) {
+    foreach ($name in @('speaker-api.md', 'RELEASE-1.1.0.md', 'RELEASE-1.2.0.md', 'RELEASE-1.3.0.md', 'RELEASE-1.4.0.md')) {
         Copy-Item -LiteralPath (Join-Path $SourceDir ('docs\' + $name)) -Destination $docs -Force
     }
 }
@@ -569,7 +577,7 @@ function Install-Whisper([string] $Target, [scriptblock] $OnProgress, [bool] $Al
         Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'install', '--no-input', 'torch==2.8.0+cu126', 'torchaudio==2.8.0+cu126', '--index-url', 'https://download.pytorch.org/whl/cu126') -WorkingDirectory $Target
     }
     Invoke-Checked -FilePath $venvPython -Arguments @('-m', 'pip', 'check') -WorkingDirectory $Target
-    Invoke-Checked -FilePath $venvPython -Arguments @('-c', 'import torch._dynamo; import faster_whisper, speechbrain; from pyannote.audio import Pipeline') -WorkingDirectory $Target
+    Invoke-Checked -FilePath $venvPython -Arguments @('-c', 'from evora_speakers import prepare_speechbrain_imports; prepare_speechbrain_imports(); import faster_whisper; from evora_joint import prepare_joint_imports; prepare_joint_imports()') -WorkingDirectory $Target
     # Record the environment only after it is known to match this release.
     Write-WhisperInstallMarker $Target
     & $OnProgress 78 'Configuring network access...'

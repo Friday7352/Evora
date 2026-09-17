@@ -3,8 +3,12 @@
 import secrets
 import time
 import ipaddress
+import threading
+import io
+import wave
+import numpy as np
 
-from flask import jsonify, request, render_template
+from flask import jsonify, request, render_template, send_file
 
 from evora_speakers import RATE, SpeakerAnalyzer, SpeakerRegistry, StreamSession, partition_turns
 
@@ -13,8 +17,16 @@ def register_routes(app, models, registry, transcribe, decode, lock):
     sessions = {}
     listening_sessions = {}
     settings_nonce = secrets.token_urlsafe(32)
+    check = {"state": "idle"}
+    check_audio = {}
     analyzer = SpeakerAnalyzer(models, registry, transcribe)
     app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
+
+    def reset_sessions():
+        nonlocal analyzer
+        sessions.clear()
+        listening_sessions.clear()
+        analyzer = SpeakerAnalyzer(models, registry, transcribe)
 
     def trusted_settings_client():
         # Use the socket peer, never client-supplied forwarding headers.
@@ -108,8 +120,7 @@ def register_routes(app, models, registry, transcribe, decode, lock):
             if not isinstance(data, dict):
                 raise ValueError("Expected settings object")
             models.configure(data)
-            sessions.clear()
-            listening_sessions.clear()
+            reset_sessions()
             return jsonify(models.status())
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
@@ -120,6 +131,90 @@ def register_routes(app, models, registry, transcribe, decode, lock):
     def speaker_status():
         return jsonify(models.status())
 
+    @app.route("/speaker-check", methods=["GET", "POST"])
+    def speaker_check():
+        if not settings_access():
+            return jsonify(error="Open speaker setup to test a recording."), 403
+        if request.method == "GET":
+            if check.get("expires", float("inf")) < time.monotonic():
+                check.clear()
+                check.update(state="idle")
+                check_audio.clear()
+            return jsonify({k:v for k,v in check.items() if k != "expires"})
+        if not lock.acquire(blocking=False):
+            return jsonify(error="Stop listening in Frivo, then try the recording test again."), 409
+        try:
+            # Video recordings are much larger than the audio Frivo normally
+            # uploads. Lift the limit only for this authenticated test route.
+            request.max_content_length = 256 * 1024 * 1024
+            if models.state != "ready":
+                raise ValueError("Prepare a speaker mode first.")
+            samples = uploaded_audio(60)
+            # Bound memory and ensure the temporary job never edits saved voices
+            # or live-session identities. Do not persist the recording to disk.
+            voices = SpeakerRegistry(registry.embed, registry.path)
+            test_analyzer = SpeakerAnalyzer(models, voices, transcribe)
+            test_analyzer.capture_sources = True
+            check.clear()
+            check.update(state="running", progress=0, duration=round(len(samples)/RATE,2))
+            check_audio.clear()
+        except Exception as exc:
+            lock.release()
+            return jsonify(error=str(exc)), 400
+
+        def run_check():
+            started = time.perf_counter()
+            try:
+                rows, previews = [], []
+                chunks = list(range(0, len(samples), 10*RATE))
+                for number, start in enumerate(chunks):
+                    chunk = samples[start:start+10*RATE]
+                    result = test_analyzer.analyze(chunk)
+                    for segment in result["segments"]:
+                        rows.append(dict(segment, start=segment["start"]+start/RATE, end=segment["end"]+start/RATE))
+                    sources, tracks = getattr(test_analyzer, "last_joint_sources", ({}, {}))
+                    for label, source in list(sources.items())[:6]:
+                        key = secrets.token_urlsafe(12)
+                        output = io.BytesIO()
+                        with wave.open(output, "wb") as wav:
+                            wav.setnchannels(1)
+                            wav.setsampwidth(2)
+                            wav.setframerate(RATE)
+                            wav.writeframes((np.clip(source,-1,1)*32767).astype('<i2').tobytes())
+                        check_audio[key] = output.getvalue()
+                        track = tracks.get(label)
+                        previews.append({"id":key,"label":track["label"] if track else "Learning voice",
+                                         "start":start/RATE,"end":(start+len(chunk))/RATE})
+                    check["progress"] = round(100*(number+1)/len(chunks))
+                elapsed = time.perf_counter()-started
+                check.update(state="complete", processing_seconds=round(elapsed,2),
+                             keeps_up=elapsed < len(samples)/RATE, segments=rows, previews=previews,
+                             notice=getattr(models,"notice", ""), expires=time.monotonic()+600)
+            except Exception as exc:
+                from evora_speakers import model_error_details
+                check.update(state="error", error=model_error_details(exc,models.settings.get("token","")),
+                             expires=time.monotonic()+600)
+            finally:
+                lock.release()
+                def expire():
+                    if check.get("expires",float("inf")) <= time.monotonic():
+                        check.clear()
+                        check.update(state="idle")
+                        check_audio.clear()
+                timer=threading.Timer(601,expire)
+                timer.daemon=True
+                timer.start()
+        threading.Thread(target=run_check,daemon=True,name="speaker-recording-check").start()
+        return jsonify(state="running"), 202
+
+    @app.get("/speaker-check/audio/<ident>")
+    def speaker_check_audio(ident):
+        if not settings_access():
+            return jsonify(error="Open speaker setup to listen to this test."), 403
+        if check.get("expires",float("inf")) < time.monotonic() or ident not in check_audio:
+            return jsonify(error="Recording test expired. Run it again."),404
+        return send_file(io.BytesIO(check_audio[ident]),mimetype="audio/wav",max_age=0), 200, {"Cache-Control":"no-store"}
+
     @app.route("/speakers", methods=["GET", "DELETE"])
     def speakers():
         if not lock.acquire(blocking=False):
@@ -127,9 +222,8 @@ def register_routes(app, models, registry, transcribe, decode, lock):
         try:
             if request.method == "DELETE":
                 registry.reset()
-                sessions.clear()
-                listening_sessions.clear()
-            return jsonify(enabled=models.state == "ready", backend="community-1 + ecapa",
+                reset_sessions()
+            return jsonify(enabled=models.state == "ready", backend=models.settings.get("engine", "community") + " + ecapa",
                            threshold=registry.threshold, margin=registry.margin,
                            speakers=registry.summary(), speaker_session=registry.session_id,
                            error=models.error)
@@ -176,8 +270,7 @@ def register_routes(app, models, registry, transcribe, decode, lock):
             import numpy as np
             clean = np.concatenate([audio[int(a * RATE):int(b * RATE)] for a, b, labels in spans if labels])
             ident = registry.enroll(clean, name)
-            sessions.clear()
-            listening_sessions.clear()
+            reset_sessions()
             return jsonify(id=ident, name=name, confirmed=True)
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
@@ -195,8 +288,7 @@ def register_routes(app, models, registry, transcribe, decode, lock):
         try:
             registry.voices.pop(ident, None)
             registry.save()
-            sessions.clear()
-            listening_sessions.clear()
+            reset_sessions()
             return jsonify(ok=True)
         finally:
             lock.release()

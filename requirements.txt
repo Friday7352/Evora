@@ -18,3 +18,6 @@ speechbrain==1.1.0
 pyannote.audio==4.0.1
 torchcodec==0.7.0
 huggingface-hub==0.36.2
+# WavLM backbone for the optional joint separation engine. Asteroid inference
+# components are bundled under vendor/ to avoid training-only native builds.
+transformers==4.57.6

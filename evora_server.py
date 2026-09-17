@@ -505,7 +505,7 @@ def status_page():
       <div class="status"><span class="dot"></span>Running</div>
       <p class="status-note">Evora is ready to accept private, local audio transcription.</p>
       <div class="grid">
-        <p><a href="http://localhost:{PORT}/speaker-settings">Speaker recognition settings (on this PC)</a></p>
+        <p><a href="/speaker-settings">Speaker recognition setup</a></p>
         <div class="stat"><div class="label">ACTIVE MODEL</div><div class="value">{model_label}</div></div>
         <div class="stat"><div class="label">PROCESSING</div><div class="value {'gpu' if gpu else ''}">{device_label}</div></div>
         <div class="stat"><div class="label">PRECISION</div><div class="value">{COMPUTE_TYPE}</div></div>
@@ -536,7 +536,7 @@ def health():
         "speaker_labelling": speaker_models.state == "ready",
         "speaker_pipeline": speaker_models.status(),
         "capabilities": ["speaker_segments", "speaker_enrollment", "speaker_filter", "rolling_stream"],
-        "speaker_backend": "community-1 + " + SPEAKER_BACKEND,
+        "speaker_backend": speaker_models.status()["model"] + " + " + SPEAKER_BACKEND,
         "speaker_threshold": speaker_registry.threshold,
     })
 
