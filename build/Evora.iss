@@ -49,6 +49,7 @@ Source: "..\VERSION";                 DestDir: "{tmp}\EvoraSetupPayload"; Flags:
 Source: "..\evora_speakers.py";        DestDir: "{tmp}\EvoraSetupPayload"; Flags: ignoreversion deleteafterinstall
 Source: "..\evora_api.py";             DestDir: "{tmp}\EvoraSetupPayload"; Flags: ignoreversion deleteafterinstall
 Source: "..\evora_joint.py";           DestDir: "{tmp}\EvoraSetupPayload"; Flags: ignoreversion deleteafterinstall
+Source: "..\evora_gpu.py";             DestDir: "{tmp}\EvoraSetupPayload"; Flags: ignoreversion deleteafterinstall
 Source: "..\vendor\*"; DestDir: "{tmp}\EvoraSetupPayload\vendor"; Excludes: "__pycache__\*,*.pyc"; Flags: ignoreversion deleteafterinstall recursesubdirs createallsubdirs
 Source: "..\templates\speaker_settings.html"; DestDir: "{tmp}\EvoraSetupPayload\templates"; Flags: ignoreversion deleteafterinstall
 Source: "..\docs\speaker-api.md"; DestDir: "{tmp}\EvoraSetupPayload\docs"; Flags: ignoreversion deleteafterinstall

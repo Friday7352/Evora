@@ -3,6 +3,11 @@
 ## Compatibility and setup
 
 `GET /health` includes `version`, `capabilities`, and `speaker_pipeline` status.
+
+`GET /gpu` (1.5.0, capability `gpu`) reports the graphics card: `name`, `total_mb`, `used_mb`,
+`util_pct`, `temp_c`, and `parts` (`ollama_mb`, `evora_mb`, `other_mb`, which add up to `used_mb`),
+plus `processes`, the biggest users. `ok` is false, with a `reason`, on a PC without an NVIDIA card.
+`parts` is null when Windows doesn't say which apps use the card.
 `GET /speaker-status` distinguishes `not_configured`, `loading`, `ready`,
 `disabled`, and `error`. It never returns the download token.
 Configure recognition at `http://localhost:9000/speaker-settings` on the server

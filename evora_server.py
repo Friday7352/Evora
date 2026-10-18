@@ -71,6 +71,7 @@ from flask import Flask, jsonify, request, send_file
 from pathlib import Path
 from evora_speakers import LocalModels, SpeakerRegistry
 from evora_api import register_routes
+import evora_gpu   # NEW (1.5.0): graphics-card memory for Frivo's GPU graph
 from faster_whisper.audio import decode_audio
 
 try:
@@ -535,10 +536,19 @@ def health():
         "version": VERSION,
         "speaker_labelling": speaker_models.state == "ready",
         "speaker_pipeline": speaker_models.status(),
-        "capabilities": ["speaker_segments", "speaker_enrollment", "speaker_filter", "rolling_stream"],
+        "capabilities": ["speaker_segments", "speaker_enrollment", "speaker_filter", "rolling_stream",
+                         "gpu"],   # CHANGED (1.5.0): GET /gpu
         "speaker_backend": speaker_models.status()["model"] + " + " + SPEAKER_BACKEND,
         "speaker_threshold": speaker_registry.threshold,
     })
+
+
+# NEW (1.5.0): how much of the graphics card's memory is in use, and by
+# whom (Ollama, Evora, everything else). Frivo graphs it. Cheap: cached for
+# a second and read from the driver and Windows, not from the models.
+@app.route("/gpu")
+def gpu_memory():
+    return jsonify(evora_gpu.snapshot(DEVICE))
 
 
 @app.route("/model", methods=["POST"])

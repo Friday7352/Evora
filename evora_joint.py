@@ -34,6 +34,12 @@ def prepare_joint_imports():
     class CompatibleEncoder:
         @staticmethod
         def from_hparams(source, **kwargs):
+            # pyannote passes torch.device; SpeechBrain 1.1 uses string
+            # membership checks ("cuda" in device) during construction.
+            if isinstance(kwargs.get("run_opts"), dict):
+                kwargs["run_opts"] = dict(kwargs["run_opts"])
+                if "device" in kwargs["run_opts"]:
+                    kwargs["run_opts"]["device"] = str(kwargs["run_opts"]["device"])
             kwargs["fetch_config"] = FetchConfig(
                 token=kwargs.pop("use_auth_token", False),
                 revision=kwargs.pop("revision", None),
