@@ -13,7 +13,7 @@ from flask import jsonify, request, render_template, send_file
 from evora_speakers import RATE, SpeakerAnalyzer, SpeakerRegistry, StreamSession, partition_turns
 
 
-def register_routes(app, models, registry, transcribe, decode, lock):
+def register_routes(app, models, registry, transcribe, decode, lock, idle=None):
     sessions = {}
     listening_sessions = {}
     settings_nonce = secrets.token_urlsafe(32)
@@ -25,6 +25,9 @@ def register_routes(app, models, registry, transcribe, decode, lock):
     def reset_sessions():
         nonlocal analyzer
         sessions.clear()
+        for ident in list(listening_sessions):   # NEW (1.5.0)
+            if idle:
+                idle.session_closed(ident)
         listening_sessions.clear()
         analyzer = SpeakerAnalyzer(models, registry, transcribe)
 
@@ -86,6 +89,8 @@ def register_routes(app, models, registry, transcribe, decode, lock):
             voices = SpeakerRegistry(registry.embed, registry.path,
                                      threshold=registry.threshold, margin=registry.margin)
             listening_sessions[ident] = [SpeakerAnalyzer(models, voices, transcribe), now]
+            if idle:
+                idle.session_opened(ident)   # NEW (1.5.0)
             return jsonify(listening_session=ident, speaker_session=voices.session_id,
                            speaker_status=models.status())
         finally:
@@ -97,6 +102,8 @@ def register_routes(app, models, registry, transcribe, decode, lock):
             return jsonify(error="Evora is processing audio. Try again shortly."), 409
         try:
             listening_sessions.pop(ident, None)
+            if idle:
+                idle.session_closed(ident)   # NEW (1.5.0): the listening countdown starts now
             return jsonify(ok=True)
         finally:
             lock.release()
@@ -310,6 +317,8 @@ def register_routes(app, models, registry, transcribe, decode, lock):
                     return jsonify(error="Listening session expired. Stop and restart listening."), 409
                 active_analyzer = listening_sessions[listening_id][0]
                 listening_sessions[listening_id][1] = time.monotonic()
+                if idle:
+                    idle.session_audio(listening_id)   # NEW (1.5.0)
             if want_speaker:
                 result = active_analyzer.analyze(audio, language)
             else:

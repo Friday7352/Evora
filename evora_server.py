@@ -72,6 +72,7 @@ from pathlib import Path
 from evora_speakers import LocalModels, SpeakerRegistry
 from evora_api import register_routes
 import evora_gpu   # NEW (1.5.0): graphics-card memory for Frivo's GPU graph
+from evora_idle import IdleKeeper   # NEW (1.5.0): frees the graphics card when idle
 from faster_whisper.audio import decode_audio
 
 try:
@@ -291,6 +292,8 @@ def embed_voice(wav):
     whichever backend is available. Normalising here means everything
     downstream can treat a dot product as a cosine regardless of model.
     """
+    if "idle" in globals():
+        idle.touch("listen")   # NEW (1.5.0): enrolling a voice counts as use
     encoder = speaker_encoder()
 
     if SPEAKER_BACKEND == "ecapa":
@@ -406,6 +409,8 @@ speaker_registry = SpeakerRegistry(embed_voice, ROOT / "known_speakers.json",
 
 def transcribe_words(audio, language=None):
     with MODEL_LOCK:
+        ensure_whisper()   # NEW (1.5.0): back from an idle unload
+        idle.touch("speech")
         segments, info = model.transcribe(
             audio, language=language, beam_size=3, condition_on_previous_text=False,
             temperature=0.0, no_speech_threshold=0.6, word_timestamps=True,
@@ -416,7 +421,47 @@ def transcribe_words(audio, language=None):
     return words, info.language
 
 
-register_routes(app, speaker_models, speaker_registry, transcribe_words, decode_audio, TRANSCRIBE_LOCK)
+# ---------------------------------------------------------------------------
+# NEW (1.5.0): freeing the graphics card when idle (see evora_idle.py)
+# ---------------------------------------------------------------------------
+
+def ensure_whisper():
+    """Loads Whisper again if it was freed while idle. Call with MODEL_LOCK held."""
+    global model
+    if model is None:
+        started = time.perf_counter()
+        print(f"Idle: loading Whisper '{MODEL_NAME}' again…", flush=True)
+        model = WhisperModel(MODEL_NAME, device=DEVICE, compute_type=COMPUTE_TYPE)
+        print(f"  ready in {time.perf_counter() - started:.1f}s", flush=True)
+
+
+def unload_whisper():
+    global model
+    # Waits for a clip in progress; never pulls the model out from under it.
+    with TRANSCRIBE_LOCK, MODEL_LOCK:
+        model = None
+        gc.collect()
+
+
+def unload_speaker_encoder():
+    global _speaker_encoder
+    _speaker_encoder = None
+
+
+def unload_listening():
+    with TRANSCRIBE_LOCK:
+        speaker_models.sleep()
+
+
+speaker_models.on_sleep = unload_speaker_encoder
+idle = IdleKeeper(ROOT, unload_listen=unload_listening, unload_speech=unload_whisper,
+                  is_listen_loaded=lambda: speaker_models.is_loaded() or _speaker_encoder is not None,
+                  is_speech_loaded=lambda: model is not None)
+speaker_models.on_use = lambda: idle.touch("listen")
+idle.start()
+
+register_routes(app, speaker_models, speaker_registry, transcribe_words, decode_audio, TRANSCRIBE_LOCK,
+                idle=idle)   # CHANGED (1.5.0): listening sessions tell the idle timer
 speaker_models.prepare()
 
 
@@ -511,6 +556,7 @@ def status_page():
         <div class="stat"><div class="label">PROCESSING</div><div class="value {'gpu' if gpu else ''}">{device_label}</div></div>
         <div class="stat"><div class="label">PRECISION</div><div class="value">{COMPUTE_TYPE}</div></div>
         <div class="stat"><div class="label">SPEAKER LABELLING</div><div class="value">{speaker_models.state.replace('_', ' ')}</div></div>
+        <div class="stat"><div class="label">GRAPHICS CARD</div><div class="value">{"Speech-to-text loaded" if model is not None else "Freed while idle"}</div></div>
       </div>
       <div class="connections">
         <div class="connection"><div class="label">ON THIS PC</div><code>{local_address}</code></div>
@@ -537,7 +583,7 @@ def health():
         "speaker_labelling": speaker_models.state == "ready",
         "speaker_pipeline": speaker_models.status(),
         "capabilities": ["speaker_segments", "speaker_enrollment", "speaker_filter", "rolling_stream",
-                         "gpu"],   # CHANGED (1.5.0): GET /gpu
+                         "gpu", "idle"],   # CHANGED (1.5.0): GET /gpu, GET/POST /idle
         "speaker_backend": speaker_models.status()["model"] + " + " + SPEAKER_BACKEND,
         "speaker_threshold": speaker_registry.threshold,
     })
@@ -548,7 +594,22 @@ def health():
 # a second and read from the driver and Windows, not from the models.
 @app.route("/gpu")
 def gpu_memory():
-    return jsonify(evora_gpu.snapshot(DEVICE))
+    data = dict(evora_gpu.snapshot(DEVICE))
+    data["idle"] = idle.status()   # NEW (1.5.0): the idle countdowns, for Frivo's graph
+    return jsonify(data)
+
+
+# NEW (1.5.0): the idle timers. GET says what's loaded and when it'll be
+# freed; POST {"listen_minutes": 5|15|60|0, "speech_minutes": 15|60|240|0}
+# sets them (0 = never). Frivo sets these from its own Settings.
+@app.route("/idle", methods=["GET", "POST"])
+def idle_timers():
+    if request.method == "POST":
+        try:
+            return jsonify(idle.configure(request.get_json(force=True) or {}))
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+    return jsonify(idle.status())
 
 
 @app.route("/model", methods=["POST"])

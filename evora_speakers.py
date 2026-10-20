@@ -224,6 +224,48 @@ class LocalModels:
         self.settings["token"] = os.environ.get("HF_TOKEN", self.settings["token"])
         os.environ.setdefault("PYANNOTE_METRICS_ENABLED", "0")
         self.notice = ""
+        # NEW (1.5.0): set by the server; called on every use, and to free
+        # the voice encoder too when these are put to sleep.
+        self.on_use = None
+        self.on_sleep = None
+
+    # NEW (1.5.0): idle unloading (see evora_idle.py).
+    def is_loaded(self):
+        return self.pipeline is not None or self.separator is not None
+
+    def sleep(self):
+        """Frees the speaker models from the graphics card. wake() brings them back."""
+        with self.lock:
+            if self.state != "ready":
+                return False
+            self.pipeline = None
+            self.separator = None
+            self.state = "sleeping"
+            self.stage = "asleep (freed while idle)"
+            if self.on_sleep:
+                self.on_sleep()
+            import gc
+            gc.collect()
+            if self.device == "cuda":
+                try:
+                    import torch
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+            return True
+
+    def wake(self):
+        """Loads the speaker models again if they were put to sleep. Blocks."""
+        if self.on_use:
+            self.on_use()
+        if self.state != "sleeping":
+            return
+        with self.lock:
+            if self.state != "sleeping":
+                return
+            print("Idle: loading the speaker models again…", flush=True)
+            self.state = "loading"
+            self._load()
 
     def status(self):
         return {"state": self.state, "error": self.error, "model": JOINT_MODEL if self.settings["engine"] == "pixit" else MODEL, "device": self.device,
@@ -330,6 +372,7 @@ class LocalModels:
 
     def turns(self, audio):
         import torch
+        self.wake()   # NEW (1.5.0)
         with self.lock, torch.inference_mode():
             if self.state != "ready":
                 raise RuntimeError("Speaker model is not ready")
@@ -342,6 +385,7 @@ class LocalModels:
 
     def joint(self, audio):
         import torch
+        self.wake()   # NEW (1.5.0)
         with self.lock, torch.inference_mode():
             if self.state != "ready" or self.settings["engine"] != "pixit":
                 raise RuntimeError("Prepare joint separation first")
@@ -352,6 +396,7 @@ class LocalModels:
     def separate(self, audio, count=2):
         import torch
         import torchaudio.functional as audio_ops
+        self.wake()   # NEW (1.5.0)
         with self.lock, torch.inference_mode():
             if count not in (2, 3):
                 return []
@@ -454,6 +499,7 @@ class SpeakerAnalyzer:
     def analyze(self, audio, language=None, *, learn=True, learn_after=0., learn_before=None):
         """Transcribe once normally; extra ASR is restricted to recoverable overlap."""
         duration = len(audio) / RATE
+        self.models.wake()   # NEW (1.5.0): back from an idle sleep, before checking it's ready
         if self.models.state == "ready" and self.models.settings.get("engine") == "pixit":
             if learn_after != 0 or learn_before is not None:
                 raise ValueError("Joint separation uses listening sessions. Use /v1/audio/transcriptions with listening_session.")

@@ -202,7 +202,7 @@ function Copy-ProgramFiles([string] $Destination) {
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
     $keep = @(
         '.gitattributes', '.gitignore', 'LICENSE', 'README.md', 'THIRD_PARTY_NOTICES.txt', 'requirements.txt',
-        'evora_server.py', 'evora_speakers.py', 'evora_joint.py', 'evora_api.py', 'evora_gpu.py', 'VERSION', 'Install-Evora.ps1', 'Uninstall-Evora.vbs',
+        'evora_server.py', 'evora_speakers.py', 'evora_joint.py', 'evora_api.py', 'evora_gpu.py', 'evora_idle.py', 'VERSION', 'Install-Evora.ps1', 'Uninstall-Evora.vbs',
         'Evora-Uninstall.ps1', 'Evora-Launcher.ps1', 'EvoraHost.exe', 'EvoraSetupHost.exe',
         'Evora.Ui.psm1', 'Evora-Setup.ps1', 'Evora-Setup.vbs', 'Evora.png', 'EvoraIcon.ico'
     )
