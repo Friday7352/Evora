@@ -1,15 +1,21 @@
 """NEW (1.5.0): frees the graphics card when Evora isn't being used.
 
+CHANGED (1.5.0): OFF unless you turn it on. Both timers default to "never".
+On a card Evora shares with Ollama, memory Evora gives up is memory Ollama
+takes, and when listening starts again the models come back into a full
+card: slowly, or not at all. Evora used to keep its memory for good, and
+that is the default again. Frivo's Settings > Evora turns the timers on.
+
 Two timers, because the two halves of Evora are used differently:
 
   listen  the speaker models (who is talking, overlapping voices, voice
           fingerprints). Only listening uses them. They stay loaded while a
           listening session is open, and are freed a short while after the
-          last one closes (default 5 minutes). Once PyTorch has used the
+          last one closes (when the timer is set). Once PyTorch has used the
           card, its own working memory (a few hundred MB) stays until Evora
           restarts; everything else is given back.
   speech  Whisper, which turns speech into text for dictation and
-          listening alike. Freed after a longer quiet spell (default 1 hour).
+          listening alike. Freed after a longer quiet spell (when set).
 
 Either comes back by itself the next time it's needed: the first clip
 after waits a few seconds while it loads, and nothing is lost.
@@ -23,8 +29,8 @@ import threading
 import time
 from pathlib import Path
 
-# Minutes; 0 means never.
-DEFAULTS = {"listen_minutes": 5, "speech_minutes": 60}
+# Minutes; 0 means never. CHANGED (1.5.0): never, unless set.
+DEFAULTS = {"listen_minutes": 0, "speech_minutes": 0}
 CHOICES = {"listen_minutes": (5, 15, 60, 0), "speech_minutes": (15, 60, 240, 0)}
 # A listening session nobody has sent audio to for this long is treated as
 # closed (Frivo was shut without stopping listening, say).

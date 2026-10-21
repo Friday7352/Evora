@@ -228,6 +228,10 @@ class LocalModels:
         # the voice encoder too when these are put to sleep.
         self.on_use = None
         self.on_sleep = None
+        # CHANGED (1.5.0): a wake that failed (the card was full) is tried
+        # again, a little later, instead of leaving speaker labelling broken.
+        self.wake_failed_at = 0.0
+        self.wake_error = ""
 
     # NEW (1.5.0): idle unloading (see evora_idle.py).
     def is_loaded(self):
@@ -255,17 +259,44 @@ class LocalModels:
             return True
 
     def wake(self):
-        """Loads the speaker models again if they were put to sleep. Blocks."""
+        """
+        Starts loading the speaker models again if they were put to sleep.
+        CHANGED (1.5.0): never blocks. The load runs in the background, as it
+        does when Evora starts, and clips in the meantime are transcribed
+        without speaker labels instead of waiting (which looked like Evora
+        hanging). A load that fails (the card is full) is tried again a
+        minute later, and the models stay "sleeping", not "error".
+        """
         if self.on_use:
             self.on_use()
         if self.state != "sleeping":
+            return
+        if time.monotonic() - self.wake_failed_at < 60:
             return
         with self.lock:
             if self.state != "sleeping":
                 return
             print("Idle: loading the speaker models again…", flush=True)
             self.state = "loading"
+            self.stage = "loading again after idle"
+
+        def load_again():
             self._load()
+            if self.state == "error":
+                self.wake_failed_at = time.monotonic()
+                self.wake_error = self.error
+                self.notice = ("The speaker models couldn't load again after being freed (" + (self.error or "")[:160]
+                               + "). Evora will try again shortly; until then clips have no speaker labels. "
+                               "If the graphics card is full, set Evora's idle timers to Never in Frivo.")
+                with self.lock:
+                    self.state = "sleeping"
+                    self.stage = "asleep (couldn't load again; will retry)"
+                print(f"Idle: couldn't load the speaker models again: {self.error}", flush=True)
+            else:
+                self.wake_error = ""
+                self.notice = ""
+
+        threading.Thread(target=load_again, daemon=True, name="speaker-model-wake").start()
 
     def status(self):
         return {"state": self.state, "error": self.error, "model": JOINT_MODEL if self.settings["engine"] == "pixit" else MODEL, "device": self.device,
@@ -499,7 +530,8 @@ class SpeakerAnalyzer:
     def analyze(self, audio, language=None, *, learn=True, learn_after=0., learn_before=None):
         """Transcribe once normally; extra ASR is restricted to recoverable overlap."""
         duration = len(audio) / RATE
-        self.models.wake()   # NEW (1.5.0): back from an idle sleep, before checking it's ready
+        if hasattr(self.models, "wake"):
+            self.models.wake()   # NEW (1.5.0): back from an idle sleep (in the background), before checking it's ready
         if self.models.state == "ready" and self.models.settings.get("engine") == "pixit":
             if learn_after != 0 or learn_before is not None:
                 raise ValueError("Joint separation uses listening sessions. Use /v1/audio/transcriptions with listening_session.")

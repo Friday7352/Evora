@@ -431,7 +431,16 @@ def ensure_whisper():
     if model is None:
         started = time.perf_counter()
         print(f"Idle: loading Whisper '{MODEL_NAME}' again…", flush=True)
-        model = WhisperModel(MODEL_NAME, device=DEVICE, compute_type=COMPUTE_TYPE)
+        try:
+            model = WhisperModel(MODEL_NAME, device=DEVICE, compute_type=COMPUTE_TYPE)
+        except Exception as exc:
+            # CHANGED (1.5.0): said plainly, and tried again on the next clip.
+            model = None
+            print(f"Idle: couldn't load Whisper again: {exc!r}", flush=True)
+            raise RuntimeError(
+                "Evora's speech-to-text was freed while idle and couldn't load again "
+                f"({type(exc).__name__}). If the graphics card is full (Ollama?), set Evora's "
+                "idle timers to Never in Frivo's Settings, or restart Evora.") from exc
         print(f"  ready in {time.perf_counter() - started:.1f}s", flush=True)
 
 
